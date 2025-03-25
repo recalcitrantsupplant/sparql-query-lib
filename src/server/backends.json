@@ -1,0 +1,13 @@
+{
+    "backends": [
+      {
+        "id": "default",
+        "name": "koenigs net on kurrawong dev",
+        "endpoint": "https://fuseki.dev.kurrawong.ai/koenigsnet/sparql",
+        "username": "kn",
+        "password": "kn",
+        "description": "string"
+      }
+    ],
+    "currentBackend": "default"
+  }

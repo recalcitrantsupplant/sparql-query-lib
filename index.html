@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPARQL Query Editor</title>
+  <!-- Vue 3 -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.js"></script>
+  <!-- Axios for API calls -->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <!-- CodeMirror core -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+  <!-- CodeMirror SPARQL mode -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/sparql/sparql.min.js"></script>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .CodeMirror {
+      height: 300px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .container {
+      margin-top: 20px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    .results-container {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .query-list {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .modal-backdrop {
+      background-color: rgba(0, 0, 0, 0.5);
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1040;
+    }
+    [v-cloak] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="container" v-cloak>
+    <h1 class="mb-4">SPARQL Query Editor</h1>
+    
+    <!-- Backend Selection -->
+    <div class="row mb-4">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header">
+            <h5>SPARQL Backends</h5>
+          </div>
+          <div class="card-body">
+            <div v-if="backends.length === 0" class="alert alert-info">
+              No backends available
+            </div>
+            <div v-else>
+              <div class="form-group">
+                <label for="backendSelect">Select Backend:</label>
+                <select id="backendSelect" class="form-select" v-model="selectedBackendId" @change="setCurrentBackend">
+                  <option v-for="backend in backends" :key="backend.id" :value="backend.id">
+                    {{ backend.name }} ({{ backend.endpoint }})
+                  </option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-outline-primary mt-2" @click="showNewBackendModal = true">Add New Backend</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Query Management -->
+    <div class="row">
+      <!-- Query List -->
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-header">
+            <h5>Saved Queries</h5>
+          </div>
+          <div class="card-body">
+            <div v-if="queries.length === 0" class="alert alert-info">
+              No queries available
+            </div>
+            <div v-else class="list-group query-list">
+              <a href="#" 
+                 class="list-group-item list-group-item-action"
+                 v-for="query in queries" 
+                 :key="query.id"
+                 :class="{ active: selectedQueryId === query.id }"
+                 @click.prevent="selectQuery(query.id)">
+                {{ query.name }}
+              </a>
+            </div>
+            <div class="mt-3">
+              <button class="btn btn-success me-2" @click="newQuery">New Query</button>
+              <button class="btn btn-danger" @click="deleteSelectedQuery" :disabled="!selectedQueryId">Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Query Editor -->
+      <div class="col-md-8">
+        <div class="card">
+          <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+              <h5>Query Editor</h5>
+              <div>
+                <button class="btn btn-primary me-2" @click="executeQuery" :disabled="!editor || !selectedBackendId">Execute</button>
+                <button class="btn btn-success" @click="saveQuery" :disabled="!editor || !queryName">Save</button>
+              </div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="queryName">Query Name:</label>
+              <input type="text" id="queryName" class="form-control" v-model="queryName" placeholder="Enter query name">
+            </div>
+            <div class="form-group">
+              <label for="queryDescription">Description:</label>
+              <textarea id="queryDescription" class="form-control" v-model="queryDescription" placeholder="Enter description"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="queryEditor">SPARQL Query:</label>
+              <div id="editor" ref="editorEl"></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Query Results -->
+        <div class="card mt-4" v-if="results">
+          <div class="card-header">
+            <h5>Query Results</h5>
+          </div>
+          <div class="card-body results-container">
+            <div v-if="loading" class="text-center">
+              <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+            <div v-else>
+              <div v-if="results.length === 0" class="alert alert-info">
+                No results found
+              </div>
+              <table v-else-if="Array.isArray(results)" class="table table-striped table-bordered">
+                <thead>
+                  <tr>
+                    <th v-for="(_, header) in results[0]" :key="header">{{ header }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, index) in results" :key="index">
+                    <td v-for="(value, key) in row" :key="key">{{ value }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <pre v-else>{{ JSON.stringify(results, null, 2) }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- New Backend Modal -->
+    <teleport to="body" v-if="showNewBackendModal">
+      <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Add New Backend</h5>
+              <button type="button" class="btn-close" @click="showNewBackendModal = false"></button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group mb-3">
+                <label for="backendName">Backend Name:</label>
+                <input type="text" id="backendName" class="form-control" v-model="newBackend.name" required>
+              </div>
+              <div class="form-group mb-3">
+                <label for="backendEndpoint">SPARQL Endpoint URL:</label>
+                <input type="url" id="backendEndpoint" class="form-control" v-model="newBackend.endpoint" required>
+              </div>
+              <div class="form-group mb-3">
+                <label for="backendUsername">Username (optional):</label>
+                <input type="text" id="backendUsername" class="form-control" v-model="newBackend.username">
+              </div>
+              <div class="form-group mb-3">
+                <label for="backendPassword">Password (optional):</label>
+                <input type="password" id="backendPassword" class="form-control" v-model="newBackend.password">
+              </div>
+              <div class="form-group mb-3">
+                <label for="backendDescription">Description:</label>
+                <textarea id="backendDescription" class="form-control" v-model="newBackend.description"></textarea>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" @click="showNewBackendModal = false">Cancel</button>
+              <button type="button" class="btn btn-primary" @click="addBackend">Add Backend</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-backdrop"></div>
+      </div>
+    </teleport>
+  </div>
+
+  <script>
+    // Set up API base URL
+    const API_BASE_URL = 'http://localhost:3000'; // Update this to your API URL
+
+    const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+    
+    const app = createApp({
+      setup() {
+        // Reactive state
+        const editor = ref(null);
+        const editorEl = ref(null);
+        const backends = ref([]);
+        const selectedBackendId = ref(null);
+        const showNewBackendModal = ref(false);
+        const newBackend = reactive({
+          name: '',
+          endpoint: '',
+          username: '',
+          password: '',
+          description: ''
+        });
+        const queries = ref([]);
+        const selectedQueryId = ref(null);
+        const queryName = ref('');
+        const queryDescription = ref('');
+        const results = ref(null);
+        const loading = ref(false);
+        const error = ref(null);
+        
+        // Functions
+        const initEditor = async () => {
+          await nextTick();
+          editor.value = CodeMirror(editorEl.value, {
+            mode: 'sparql',
+            lineNumbers: true,
+            theme: 'default',
+            lineWrapping: true,
+            value: 'PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nPREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\nSELECT ?subject ?predicate ?object\nWHERE {\n  ?subject ?predicate ?object\n}\nLIMIT 10'
+          });
+        };
+        
+        const loadBackends = async () => {
+          try {
+            const response = await axios.get(`${API_BASE_URL}/backends`);
+            backends.value = response.data;
+          } catch (error) {
+            console.error('Error loading backends:', error);
+          }
+        };
+        
+        const getCurrentBackend = async () => {
+          try {
+            const response = await axios.get(`${API_BASE_URL}/backends/current`);
+            if (response.data && response.data.id) {
+              selectedBackendId.value = response.data.id;
+            }
+          } catch (error) {
+            console.error('Error getting current backend:', error);
+          }
+        };
+        
+        const setCurrentBackend = async () => {
+          if (!selectedBackendId.value) return;
+          
+          try {
+            await axios.post(`${API_BASE_URL}/backends/current`, {
+              id: selectedBackendId.value
+            });
+          } catch (error) {
+            console.error('Error setting current backend:', error);
+          }
+        };
+        
+        const addBackend = async () => {
+          try {
+            const response = await axios.post(`${API_BASE_URL}/backends`, {
+              name: newBackend.name,
+              endpoint: newBackend.endpoint,
+              username: newBackend.username,
+              password: newBackend.password,
+              description: newBackend.description
+            });
+            
+            showNewBackendModal.value = false;
+            
+            // Reset form
+            newBackend.name = '';
+            newBackend.endpoint = '';
+            newBackend.username = '';
+            newBackend.password = '';
+            newBackend.description = '';
+            
+            // Reload backends
+            await loadBackends();
+          } catch (error) {
+            console.error('Error adding backend:', error);
+          }
+        };
+        
+        const loadQueries = async () => {
+          try {
+            const response = await axios.get(`${API_BASE_URL}/queries`);
+            queries.value = response.data;
+          } catch (error) {
+            console.error('Error loading queries:', error);
+          }
+        };
+        
+        const selectQuery = async (queryId) => {
+          selectedQueryId.value = queryId;
+          
+          try {
+            const response = await axios.get(`${API_BASE_URL}/queries/${queryId}`);
+            const query = response.data;
+            
+            queryName.value = query.name;
+            queryDescription.value = query.description || '';
+            editor.value.setValue(query.query);
+          } catch (error) {
+            console.error('Error loading query:', error);
+          }
+        };
+        
+        const saveQuery = async () => {
+          const queryData = {
+            name: queryName.value,
+            description: queryDescription.value,
+            query: editor.value.getValue()
+          };
+          
+          try {
+            if (selectedQueryId.value) {
+              // Update existing query
+              await axios.put(`${API_BASE_URL}/queries/${selectedQueryId.value}`, queryData);
+            } else {
+              // Create new query
+              const response = await axios.post(`${API_BASE_URL}/queries`, queryData);
+              selectedQueryId.value = response.data.id;
+            }
+            
+            // Reload queries
+            await loadQueries();
+          } catch (error) {
+            console.error('Error saving query:', error);
+          }
+        };
+        
+        const deleteSelectedQuery = async () => {
+          if (!selectedQueryId.value) return;
+          
+          if (confirm('Are you sure you want to delete this query?')) {
+            try {
+              await axios.delete(`${API_BASE_URL}/queries/${selectedQueryId.value}`);
+              
+              // Clear selection
+              selectedQueryId.value = null;
+              queryName.value = '';
+              queryDescription.value = '';
+              editor.value.setValue('');
+              
+              // Reload queries
+              await loadQueries();
+            } catch (error) {
+              console.error('Error deleting query:', error);
+            }
+          }
+        };
+        
+        const newQuery = () => {
+          selectedQueryId.value = null;
+          queryName.value = '';
+          queryDescription.value = '';
+          editor.value.setValue('PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nPREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\nSELECT ?subject ?predicate ?object\nWHERE {\n  ?subject ?predicate ?object\n}\nLIMIT 10');
+        };
+        
+        const executeQuery = async () => {
+          if (!selectedBackendId.value) {
+            alert('Please select a backend first');
+            return;
+          }
+          
+          loading.value = true;
+          results.value = null;
+          error.value = null;
+          
+          try {
+            let response;
+            
+            if (selectedQueryId.value) {
+              // Execute saved query
+              response = await axios.post(`${API_BASE_URL}/queries/${selectedQueryId.value}/execute`, {});
+            } else {
+              // Execute ad-hoc query (you might need to implement this endpoint)
+              response = await axios.post(`${API_BASE_URL}/queries/execute`, {
+                query: editor.value.getValue()
+              });
+            }
+            
+            results.value = response.data;
+          } catch (error) {
+            console.error('Error executing query:', error);
+            error.value = error.response?.data?.message || 'An error occurred while executing the query';
+          } finally {
+            loading.value = false;
+          }
+        };
+        
+        // Lifecycle hooks
+        onMounted(() => {
+          initEditor();
+          loadBackends();
+          loadQueries();
+          getCurrentBackend();
+        });
+        
+        return {
+          // State
+          editor,
+          editorEl,
+          backends,
+          selectedBackendId,
+          showNewBackendModal,
+          newBackend,
+          queries,
+          selectedQueryId,
+          queryName,
+          queryDescription,
+          results,
+          loading,
+          error,
+          
+          // Methods
+          setCurrentBackend,
+          addBackend,
+          selectQuery,
+          saveQuery,
+          deleteSelectedQuery,
+          newQuery,
+          executeQuery
+        };
+      }
+    });
+    
+    app.mount('#app');
+  </script>
+</body>
+</html>
