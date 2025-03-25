@@ -6,6 +6,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { backendState } from './backend';
 import { SparqlQueryParser } from '../lib/parser';
+import { config } from './config';
+import { performance } from 'perf_hooks';
 
 const QUERIES_PATH = path.join(__dirname, 'queries.json');
 
@@ -64,8 +66,16 @@ function generateId(): string {
   return randomUUID().substring(0, 8); // Generate a short random ID
 }
 
+let queries: StoredQuery[] = [];
+
 export async function registerQueryRoutes(app: FastifyInstance) {
-  let queries: StoredQuery[] = [];
+  try {
+    queries = await readQueries();
+  } catch (error: any) {
+    console.error('Error initializing queries:', error);
+    // Consider a more robust error handling strategy, such as exiting the process
+    // or providing a default set of queries.  For now, we'll leave queries as []
+  }
 
   // List all queries
   app.get<{ Querystring: { page?: number; limit?: number; sort?: string; order?: string } }>('/queries', {
@@ -76,21 +86,14 @@ export async function registerQueryRoutes(app: FastifyInstance) {
         type: 'object',
         properties: {
           page: { type: 'number', description: 'Page number' },
-          limit: { type: 'number', description: 'Number of items per page' },
-          sort: { type: 'string', description: 'Field to sort by' },
-          order: { type: 'string', description: 'Sort order (asc or desc)' }
+          limit: { type: 'number' },
+          sort: { type: 'string' },
+          order: { type: 'string' }
         },
         required: []
       }
     }
   }, async (request: FastifyRequest<{ Querystring: { page?: number; limit?: number; sort?: string; order?: string } }>, reply: FastifyReply) => {
-    try {
-      queries = await readQueries();
-    } catch (error: any) {
-      console.error('Error initializing queries:', error);
-      return reply.status(500).send({ error: 'Failed to read queries.json' });
-    }
-
     const { page, limit, sort, order } = request.query;
 
     return {
@@ -132,11 +135,9 @@ export async function registerQueryRoutes(app: FastifyInstance) {
       updatedAt: now,
     };
 
-    queries = [...queries, newQuery];
+    queries.push(newQuery);
     await writeQueries(queries);
-
-    reply.status(201); // Created
-    return newQuery;
+    reply.status(201).send(newQuery);
   });
 
   // Get a specific query
@@ -156,11 +157,12 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     const { queryId } = request.params;
     const query = queries.find(q => q.id === queryId);
 
-    if (!query) {
-      return reply.status(404).send({ error: 'Query not found' });
+    if (query) {
+      return reply.status(200).send(query);
     }
 
-    return query;
+    console.log(`[DEBUG] Query not found for id: ${queryId}`);
+    return reply.status(404).send({ error: 'Query not found' });
   });
 
   // Update a query (full update)
@@ -205,8 +207,7 @@ export async function registerQueryRoutes(app: FastifyInstance) {
 
     queries[existingQueryIndex] = updatedQuery;
     await writeQueries(queries);
-
-    return updatedQuery;
+    reply.status(200).send(updatedQuery);
   });
 
   // Delete a query
@@ -225,15 +226,14 @@ export async function registerQueryRoutes(app: FastifyInstance) {
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
 
-    const initialLength = queries.length;
-    queries = queries.filter(q => q.id !== queryId);
-
-    if (queries.length === initialLength) {
+    const existingQueryIndex = queries.findIndex(q => q.id === queryId);
+    if (existingQueryIndex === -1) {
       return reply.status(404).send({ error: 'Query not found' });
     }
 
+    queries.splice(existingQueryIndex, 1);
     await writeQueries(queries);
-    reply.status(204).send(); // No content
+    reply.status(204).send();
   });
 
   // List variables in a query
@@ -273,10 +273,25 @@ export async function registerQueryRoutes(app: FastifyInstance) {
         required: ['queryId']
       },
       body: {
-        type: 'object'
+        type: 'array',
+        examples: [
+          [
+            {
+          "head": { "vars": [ "pred"]
+          } ,
+          "arguments": { 
+            "bindings": [
+              {
+                "pred": { "type": "uri" , "value": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type" } 
+              } 
+            ] 
+          } 
+        }
+      ]
+    ]
       }
     }
-  }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { [variable: string]: any } }>, reply: FastifyReply) => {
+   }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { [variable: string]: any } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
     const query = queries.find(q => q.id === queryId);
 
@@ -295,13 +310,27 @@ export async function registerQueryRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: 'Current backend not found' });
     }
 
+    const startTime = config.enableTimingLogs ? performance.now() : 0;
+    if (config.enableTimingLogs) console.time(`Query ${queryId} received`);
+
+    let result;
     try {
-      const result = await executeQuery(query.query, variables, backend.id);
+      if (config.enableTimingLogs) console.time(`Query ${queryId} execution`);
+      result = await executeQuery(query.query, variables, backend.id);
+      if (config.enableTimingLogs) console.timeEnd(`Query ${queryId} execution`);
       const body = await result.body.json();
+      if (config.enableTimingLogs) {
+        const totalTime = performance.now() - startTime;
+        console.log(`Query ${queryId} total time: ${totalTime}ms`);
+        reply.header('X-Query-Time', totalTime); // Add header for timing
+        return reply.send(body);
+      }
       return body;
     } catch (error) {
       console.error('Error executing query:', error);
       return reply.status(500).send({ error: 'Failed to execute query' });
+    } finally {
+        if (config.enableTimingLogs) console.timeEnd(`Query ${queryId} received`);
     }
   });
 }

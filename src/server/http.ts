@@ -1,6 +1,7 @@
 import { request } from 'undici';
 import { backendState } from './backend';
 import { SparqlQueryParser } from '../lib/parser';
+import { config } from './config';
 
 export async function executeQuery(sparqlQuery: string, variables: { [variable: string]: any } = {}, backendId?: string) {
   const backend = backendId
@@ -13,7 +14,12 @@ export async function executeQuery(sparqlQuery: string, variables: { [variable: 
 
   try {
     const parser = new SparqlQueryParser();
-    const replacedQuery = variables ? parser.applyBindings(sparqlQuery, variables) : sparqlQuery;
+    let replacedQuery = sparqlQuery;
+    if (variables) {
+      if (config.enableTimingLogs) console.time('Variable substitution');
+      replacedQuery = parser.applyBindings(sparqlQuery, variables);
+      if (config.enableTimingLogs) console.timeEnd('Variable substitution');
+    }
 
     const { username, password } = backend;
     const auth = username && password ? `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` : undefined;

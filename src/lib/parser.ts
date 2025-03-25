@@ -193,12 +193,6 @@ export class SparqlQueryParser {
                   } : undefined
                 };
                 break;
-              case 'bnode':
-                newRow[varKey] = {
-                  termType: 'BlankNode',
-                  value: bindingValue.value
-                };
-                break;
               default:
                 newRow[varKey] = undefined; // UNDEF
             }

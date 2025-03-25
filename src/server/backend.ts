@@ -1,5 +1,4 @@
 import { FastifyInstance, FastifyRequest, FastifyReply, RouteHandler } from 'fastify';
-import { sparqlConfig } from './config';
 import * as dotenv from 'dotenv';
 import fs from 'fs';
 import { randomUUID } from 'crypto';

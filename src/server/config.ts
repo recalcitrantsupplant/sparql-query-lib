@@ -1,7 +1,7 @@
-export interface SparqlConfig {
-  endpoint: string;
-  username: string;
-  password: string;
+export interface Config {
+  enableTimingLogs: boolean;
 }
 
-export const sparqlConfig: SparqlConfig[] = [];
+export const config: Config = {
+  enableTimingLogs: true,
+};

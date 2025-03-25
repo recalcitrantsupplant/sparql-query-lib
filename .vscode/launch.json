@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Server",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeArgs": [
+        "--inspect-brk"
+      ],
+      "console": "integratedTerminal",
+      "restart": true,
+      "program": "dist/index.js",
+      "preLaunchTask": "build"
+    }
+  ]
+}
