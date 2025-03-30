@@ -68,25 +68,5 @@
         "updatedAt": "2025-03-26T12:03:12.643Z"
       }
     ]
-  },
-  {
-    "id": "230760af",
-    "name": "library-for-inject-testing",
-    "queries": []
-  },
-  {
-    "id": "45a0a029",
-    "name": "find-me-library",
-    "queries": []
-  },
-  {
-    "id": "02059a06",
-    "name": "set-get-test-inject-1743330445753",
-    "queries": []
-  },
-  {
-    "id": "4f90804f",
-    "name": "set-get-test-inject-1743330515497",
-    "queries": []
   }
 ]

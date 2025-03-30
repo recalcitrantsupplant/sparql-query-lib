@@ -10,6 +10,5 @@ module.exports = {
   coverageDirectory: 'coverage',
   collectCoverageFrom: [
     'src/**/*.ts'
-  ],
-  setupFilesAfterEnv: ['<rootDir>/test/server/http.check.test.ts']
+  ]
 };
