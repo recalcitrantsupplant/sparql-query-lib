@@ -1,138 +1,141 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { executeQuery } from './http';
-import { StoredQuery, VariableRestrictions, VariableGroup } from '../types'; // Keep types
-import { backendState } from './backend';
+import { StoredQuery, VariableGroup, Library, Backend } from '../types'; // Import Backend type
+// Removed backendState import
 import { config } from './config';
 import { performance } from 'perf_hooks';
-import { FileSystemQueryStorage } from './queryStorage'; // Import storage
-import { QueryManager } from './queryManager'; // Import manager
-import { LibraryManager } from './libraryManager';
+import { LibraryManager } from './libraryManager'; // Keep LibraryManager
 
 // Extend FastifyInstance types if not already done globally
 declare module 'fastify' {
   interface FastifyInstance {
-    queryManager: QueryManager;
-    libraryManager: LibraryManager; // Ensure this is declared
+    // queryManager: QueryManager; // Removed QueryManager decoration
+    libraryManager: LibraryManager;
   }
 }
 
 export async function registerQueryRoutes(app: FastifyInstance) {
 
-  // Managers are now decorated onto the app instance in src/index.ts
-  // const storage = new FileSystemQueryStorage(); // Removed
-  // const queryManager = new QueryManager(storage); // Removed
-  // const libraryManager = queryManager['libraryManager']; // Removed
+  // LibraryManager is decorated onto the app instance in src/index.ts
 
-  // Initialization is handled in src/index.ts
-  // await queryManager.initialize(); // Removed
-
-  // List queries for the CURRENT library
-  app.get<{ Querystring: { page?: number; limit?: number; sort?: string; order?: string } }>('/queries', {
+  // List queries for a SPECIFIC library
+  app.get<{ Querystring: { libraryId: string; page?: number; limit?: number; sort?: string; order?: string } }>('/queries', {
     schema: {
       tags: ['Query'],
-      operationId: 'listQueries',
+      operationId: 'listQueriesByLibrary', // Updated operationId
       querystring: {
         type: 'object',
         properties: {
+          libraryId: { type: 'string', description: 'ID of the library to list queries for' }, // Added libraryId
           page: { type: 'number', description: 'Page number' },
           limit: { type: 'number' },
           sort: { type: 'string' },
           order: { type: 'string' }
         },
-        required: []
+        required: ['libraryId'] // libraryId is now required
       }
     }
-  }, async (request: FastifyRequest<{ Querystring: { page?: number; limit?: number; sort?: string; order?: string } }>, reply: FastifyReply) => {
-    const { page = 1, limit = 10, sort, order } = request.query; // Default page/limit
+  }, async (request: FastifyRequest<{ Querystring: { libraryId: string; page?: number; limit?: number; sort?: string; order?: string } }>, reply: FastifyReply) => {
+    const { libraryId, page = 1, limit = 10, sort, order } = request.query;
 
-    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
-    if (!currentLibraryId) {
-        return reply.status(400).send({ error: 'No active library set or found.' });
-    }
-
-    const library = app.libraryManager.getLibraries().find(lib => lib.id === currentLibraryId);
-    const queries = library ? library.queries : [];
-
-    // TODO: Implement pagination/sorting on 'queries' array if needed
-    return {
-      data: queries,
-      metadata: {
-        total: queries.length,
-        page: page,
-        limit: limit
-      }
-    };
-  });
-
-  // Create a new query
-  app.post<{ Body: { name: string; description?: string; query: string } }>('/queries', {
-    schema: {
-      tags: ['Query'],
-      operationId: 'createQuery',
-      body: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          description: { type: 'string' },
-          query: { type: 'string' }
-        },
-        required: ['name', 'query']
-      }
-    }
-  }, async (request: FastifyRequest<{ Body: { name: string; description?: string; query: string } }>, reply: FastifyReply) => {
-    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
-    if (!currentLibraryId) {
-        return reply.status(400).send({ error: 'Cannot create query: No active library set.' });
-    }
     try {
-      // Delegate creation entirely to the manager, passing libraryId
-      const newQuery = await app.queryManager.createQuery(currentLibraryId, request.body);
-      reply.status(201).send(newQuery);
+        // Fetch queries directly using libraryManager
+        const queries = await app.libraryManager.getQueriesByLibrary(libraryId);
+
+        // TODO: Implement pagination/sorting on 'queries' array if needed
+        // For now, return all queries for the library
+        return {
+          data: queries,
+          metadata: {
+            total: queries.length,
+            page: page, // Reflect requested page/limit even if not fully implemented
+            limit: limit
+          }
+        };
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to create query.';
-        console.error('Error processing create query request:', error);
-        // Return specific error from manager if available
+        const errorMessage = error instanceof Error ? error.message : 'Failed to list queries.';
+        // Check if error indicates library not found (optional, depends on storage impl)
+        // if (error.message.includes('not found')) {
+        //     return reply.status(404).send({ error: `Library with ID ${libraryId} not found.` });
+        // }
+        console.error(`Error listing queries for library ${libraryId}:`, error);
         reply.status(500).send({ error: errorMessage });
     }
   });
 
-  // Get a specific query
+  // Create a new query in a specific library
+  app.post<{ Body: { libraryId: string; name: string; description?: string; query: string } }>('/queries', {
+    schema: {
+      tags: ['Query'],
+      operationId: 'createQueryInLibrary', // Updated operationId
+      body: {
+        type: 'object',
+        properties: {
+          libraryId: { type: 'string', description: 'ID of the library to add the query to' }, // Added libraryId
+          name: { type: 'string' },
+          description: { type: 'string' },
+          query: { type: 'string' }
+        },
+        required: ['libraryId', 'name', 'query'] // libraryId is now required
+      }
+    }
+  }, async (request: FastifyRequest<{ Body: { libraryId: string; name: string; description?: string; query: string } }>, reply: FastifyReply) => {
+    const { libraryId, ...queryData } = request.body; // Extract libraryId
+
+    try {
+      // Use libraryManager directly
+      const newQuery = await app.libraryManager.addQueryToLibrary(libraryId, queryData);
+      reply.status(201).send(newQuery);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to create query.';
+        console.error('Error processing create query request:', error);
+        // Check for specific errors like "Library not found"
+        if (errorMessage.includes('not found')) {
+             reply.status(404).send({ error: errorMessage });
+        } else {
+             reply.status(500).send({ error: errorMessage });
+        }
+    }
+  });
+
+  // Get a specific query by its ID (assuming query IDs are globally unique)
   app.get<{ Params: { queryId: string } }>('/queries/:queryId', {
     schema: {
       tags: ['Query'],
-      operationId: 'getQuery',
+      operationId: 'getQueryById', // Updated operationId
       params: {
         type: 'object',
         properties: {
-          queryId: { type: 'string', default: 'example' }
+          queryId: { type: 'string', description: 'ID of the query' } // Default removed
         },
         required: ['queryId']
       }
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
-    if (!currentLibraryId) {
-        // Although getting a query might not strictly need an *active* library,
-        // our QueryManager now requires it. Adjust if needed.
-        return reply.status(400).send({ error: 'Cannot get query: No active library set.' });
-    }
+    // No need for currentLibraryId
 
-    const query = app.queryManager.getQueryById(currentLibraryId, queryId); // Use manager with libraryId
+    try {
+        // Use libraryManager directly
+        const query = await app.libraryManager.getQueryById(queryId);
 
-    if (query) {
-      reply.status(200).send(query);
-    } else {
-      console.log(`[DEBUG] Query not found for id: ${queryId}`);
-      reply.status(404).send({ error: 'Query not found' });
+        if (query) {
+          reply.status(200).send(query);
+        } else {
+          reply.status(404).send({ error: `Query with ID ${queryId} not found` });
+        }
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to get query.';
+        console.error(`Error getting query ${queryId}:`, error);
+        reply.status(500).send({ error: errorMessage });
     }
   });
 
-    // Update a query (full update)
+    // Update a query (full update, assuming query IDs are globally unique)
     app.put<{ Params: { queryId: string }, Body: { name: string; description?: string; query: string } }>('/queries/:queryId', {
-        schema: { // Keep schema
+        schema: {
       tags: ['Query'],
-      operationId: 'updateQuery',
+      operationId: 'updateQueryById', // Updated operationId
       params: {
         type: 'object',
         properties: {
@@ -143,45 +146,40 @@ export async function registerQueryRoutes(app: FastifyInstance) {
       body: {
         type: 'object',
         properties: {
+          // libraryId is NOT needed here if queryId is unique
           name: { type: 'string' },
           description: { type: 'string' },
           query: { type: 'string' }
         },
         required: ['name', 'query']
-      } // End schema properties
-    } // End schema
+      }
+    }
   }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { name: string; description?: string; query: string } }>, reply: FastifyReply) => {
         const { queryId } = request.params;
-        const currentLibraryId = app.libraryManager.getCurrentLibraryId();
-        if (!currentLibraryId) {
-            return reply.status(400).send({ error: 'Cannot update query: No active library set.' });
-        }
+        // No need for currentLibraryId
 
         try {
-            // Delegate update entirely to the manager, passing libraryId
-            const updatedQuery = await app.queryManager.updateQuery(currentLibraryId, queryId, request.body);
+            // Use libraryManager directly
+            const updatedQuery = await app.libraryManager.updateQuery(queryId, request.body);
 
-            // updateQuery now throws on not found, so no need to check null
-            reply.status(200).send(updatedQuery);
-            /* Original check removed as updateQuery throws now:
             if (updatedQuery) {
                 reply.status(200).send(updatedQuery);
             } else {
-                reply.status(404).send({ error: 'Query not found' });
+                // updateQuery returns null if not found
+                reply.status(404).send({ error: `Query with ID ${queryId} not found` });
             }
-            */ // Add missing closing comment tag
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Failed to update query.';
-            console.error('Error processing update query request:', error);
+            console.error(`Error updating query ${queryId}:`, error);
             reply.status(500).send({ error: errorMessage });
         }
     });
 
-    // Delete a query
+    // Delete a query by its ID (assuming query IDs are globally unique)
     app.delete<{ Params: { queryId: string } }>('/queries/:queryId', {
         schema: {
       tags: ['Query'],
-      operationId: 'deleteQuery',
+      operationId: 'deleteQueryById', // Updated operationId
       params: {
         type: 'object',
         properties: {
@@ -192,32 +190,30 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
         const { queryId } = request.params;
-        const currentLibraryId = app.libraryManager.getCurrentLibraryId();
-        if (!currentLibraryId) {
-            return reply.status(400).send({ error: 'Cannot delete query: No active library set.' });
-        }
+        // No need for currentLibraryId
 
         try {
-            // Delegate deletion entirely to the manager, passing libraryId
-            const deleted = await app.queryManager.deleteQuery(currentLibraryId, queryId);
+            // Use libraryManager directly
+            const deleted = await app.libraryManager.removeQuery(queryId);
 
             if (deleted) {
-                reply.status(204).send();
+                reply.status(204).send(); // Success, no content
             } else {
-                reply.status(404).send({ error: 'Query not found' });
+                // removeQuery returns false if not found
+                reply.status(404).send({ error: `Query with ID ${queryId} not found` });
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Failed to delete query.';
-            console.error('Error processing delete query request:', error);
+            console.error(`Error deleting query ${queryId}:`, error);
             reply.status(500).send({ error: errorMessage });
         }
     });
 
-  // List variables in a query
+  // List variables in a query by its ID (assuming query IDs are globally unique)
   app.get<{ Params: { queryId: string } }>('/queries/:queryId/variables', {
     schema: {
       tags: ['Query'],
-      operationId: 'listQueryVariables',
+      operationId: 'listQueryVariablesById', // Updated operationId
       params: {
         type: 'object',
         properties: {
@@ -228,25 +224,31 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
-     if (!currentLibraryId) {
-        return reply.status(400).send({ error: 'Cannot list variables: No active library set.' });
-    }
-    const query = app.queryManager.getQueryById(currentLibraryId, queryId); // Use manager with libraryId
+    // No need for currentLibraryId
 
-    if (!query) {
-      reply.status(404).send({ error: 'Query not found in active library' });
-      return; // Added return
-    }
+    try {
+        // Use libraryManager directly
+        const query = await app.libraryManager.getQueryById(queryId);
 
-    reply.send(query.variables || []); // Send variables or empty array
+        if (!query) {
+          reply.status(404).send({ error: `Query with ID ${queryId} not found` });
+          return;
+        }
+
+        reply.send(query.variables || []); // Send variables or empty array
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to get query variables.';
+        console.error(`Error getting variables for query ${queryId}:`, error);
+        reply.status(500).send({ error: errorMessage });
+    }
   });
 
-  // Execute a query with variables
-  app.post<{ Params: { queryId: string }, Body: { [variable: string]: any } }>('/queries/:queryId/execute', {
+  // Execute a query by its ID using a specified backend
+  // Body now includes backendId and the bindings array
+  app.post<{ Params: { queryId: string }, Body: { backendId: string; bindings: any } }>('/queries/:queryId/execute', {
     schema: {
       tags: ['Query'],
-      operationId: 'executeQueryWithVariables',
+      operationId: 'executeQueryByIdWithBackend', // Updated operationId
       params: {
         type: 'object',
         properties: {
@@ -255,69 +257,85 @@ export async function registerQueryRoutes(app: FastifyInstance) {
         required: ['queryId']
       },
       body: {
-        type: 'array',
-        examples: [
-          [
-            {
-          "head": { "vars": [ "pred"]
-          } ,
-          "arguments": { 
-            "bindings": [
+        type: 'object',
+        properties: {
+            backendId: { type: 'string', description: 'ID of the backend to execute against' },
+            bindings: { type: 'array', description: 'SPARQL bindings array' } // Keep bindings schema flexible
+        },
+        required: ['backendId', 'bindings'],
+         examples: [ // Example updated to include backendId
+          {
+            backendId: 'example-backend-id',
+            bindings: [
               {
-                "pred": { "type": "uri" , "value": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type" } 
-              } 
-            ] 
-          } 
-        }
-      ]
-    ]
+                "head": { "vars": [ "pred"] },
+                "arguments": {
+                  "bindings": [
+                    { "pred": { "type": "uri", "value": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type" } }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       }
     }
-   }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { [variable: string]: any } }>, reply: FastifyReply) => {
+   }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { backendId: string; bindings: any } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
-     if (!currentLibraryId) {
-        return reply.status(400).send({ error: 'Cannot execute query: No active library set.' });
-    }
-    const query = app.queryManager.getQueryById(currentLibraryId, queryId); // Use manager with libraryId
+    const { backendId, bindings } = request.body; // Extract backendId and bindings
 
+     let query: StoredQuery | null = null;
+     let backend: Backend | null = null;
+     // Fetch query and backend concurrently
+    try {
+        [query, backend] = await Promise.all([
+            app.libraryManager.getQueryById(queryId),
+            app.backendStorage.getBackendById(backendId)
+        ]);
+    } catch (error) {
+         const errorMessage = error instanceof Error ? error.message : 'Failed to retrieve query or backend before execution.';
+         console.error(`Error getting query ${queryId} or backend ${backendId} for execution:`, error);
+         return reply.status(500).send({ error: errorMessage });
+    }
+
+    // Check if query or backend was found
     if (!query) {
-      reply.status(404).send({ error: 'Query not found in active library' });
-      return; // Added return
+      return reply.status(404).send({ error: `Query with ID ${queryId} not found` });
     }
-
-    const variables = request.body;
-
-    if (!backendState.currentBackend) {
-      return reply.status(500).send({ error: 'No backend set' });
-    }
-
-    const backend = backendState.backends.find(b => b.id === backendState.currentBackend);
     if (!backend) {
-      return reply.status(500).send({ error: 'Current backend not found' });
+      return reply.status(404).send({ error: `Backend with ID ${backendId} not found` });
     }
+
+    // const variables = request.body; // Bindings payload - already extracted as 'bindings'
 
     const startTime = config.enableTimingLogs ? performance.now() : 0;
-    if (config.enableTimingLogs) console.time(`Query ${queryId} received`);
+    if (config.enableTimingLogs) console.time(`Query ${queryId} on backend ${backendId} received`);
 
-    let result;
+     let result;
     try {
-      if (config.enableTimingLogs) console.time(`Query ${queryId} execution`);
-      result = await executeQuery(query.query, variables, backend.id);
-      if (config.enableTimingLogs) console.timeEnd(`Query ${queryId} execution`);
+      if (config.enableTimingLogs) console.time(`Query ${queryId} on backend ${backendId} execution`);
+      // Pass backendStorage, query, backendId, and bindings to executeQuery
+      result = await executeQuery(app.backendStorage, query.query, backend.id, bindings); // Corrected arguments
+      if (config.enableTimingLogs) console.timeEnd(`Query ${queryId} on backend ${backendId} execution`);
+
+      // Process result (assuming executeQuery returns something with body.json())
+      // Note: Need to handle potential errors from executeQuery itself (e.g., network issues)
       const body = await result.body.json();
+
       if (config.enableTimingLogs) {
         const totalTime = performance.now() - startTime;
-        console.log(`Query ${queryId} total time: ${totalTime}ms`);
-        reply.header('X-Query-Time', totalTime); // Add header for timing
+        console.log(`Query ${queryId} on backend ${backendId} total time: ${totalTime}ms`);
+        reply.header('X-Query-Time', totalTime);
         return reply.send(body);
       }
-      return body;
+      return reply.send(body);
     } catch (error) {
-      console.error('Error executing query:', error);
-      return reply.status(500).send({ error: 'Failed to execute query' });
+      // Handle errors during executeQuery or result processing
+      console.error(`Error executing query ${queryId} on backend ${backendId}:`, error);
+      // Provide more specific error if possible (e.g., from executeQuery response)
+      return reply.status(500).send({ error: `Failed to execute query on backend ${backendId}` });
     } finally {
-        if (config.enableTimingLogs) console.timeEnd(`Query ${queryId} received`);
+        if (config.enableTimingLogs) console.timeEnd(`Query ${queryId} on backend ${backendId} received`);
     }
   });
 }

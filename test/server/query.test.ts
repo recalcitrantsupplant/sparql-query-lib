@@ -1,11 +1,12 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import * as fs from 'fs';
 import * as path from 'path';
-import { registerQueryRoutes } from '../../src/server/query'; // Import query routes
-import { QueryManager } from '../../src/server/queryManager';
+import { registerQueryRoutes } from '../../src/server/query';
+// Removed: import { QueryManager } from '../../src/server/queryManager';
 import { LibraryManager } from '../../src/server/libraryManager';
-import { FileSystemQueryStorage, IQueryStorage } from '../../src/server/queryStorage';
-import { StoredQuery, VariableGroup } from '../../src/types'; // Import StoredQuery and VariableGroup types
+// Updated imports for storage
+import { FileSystemLibraryStorage, ILibraryStorage } from '../../src/server/libraryStorage';
+import { StoredQuery, VariableGroup, Library } from '../../src/types'; // Import necessary types
 
 // Define interfaces used in tests
 interface QuerySummary {
@@ -39,52 +40,71 @@ let defaultTestLibraryId: string;
 // --------------------------------------------------------------------
 
 // Helper function to build the Fastify app for testing
-async function buildTestApp(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false }); // Disable logger for cleaner test output
+// Removed QueryManager from return type
+async function buildTestApp(): Promise<{ app: FastifyInstance, libraryManager: LibraryManager, defaultLibraryId: string }> {
+  const app = Fastify({ logger: false });
 
   // Use temporary copies for test isolation
-  fs.copyFileSync(EMPTY_QUERIES_PATH, TEST_QUERY_STORAGE_PATH);
+  // Note: We only need one storage file now as FileSystemLibraryStorage handles both
   fs.copyFileSync(EMPTY_LIBS_PATH, TEST_LIB_STORAGE_PATH);
 
   // --- Create test-specific storage instances ---
-  const queryStorage: IQueryStorage = new FileSystemQueryStorage(TEST_QUERY_STORAGE_PATH);
-  const libraryStorage: IQueryStorage = new FileSystemQueryStorage(TEST_LIB_STORAGE_PATH); // Use separate storage
+  // Use the new interface and implementation
+  const libraryStorage: ILibraryStorage = new FileSystemLibraryStorage(TEST_LIB_STORAGE_PATH);
   // ---------------------------------------------
 
   // Instantiate Managers with test storage
   const libraryManager = new LibraryManager(libraryStorage);
-  await libraryManager.initialize();
+  await libraryManager.initialize(); // Initialize manager (verifies storage)
 
-  // QueryManager depends on LibraryManager
-  const queryManager = new QueryManager(libraryManager); // Corrected: Only pass libraryManager
-  // Removed: await queryManager.initialize();
+  // Removed: QueryManager instantiation
+
+  // --- Create a default library for tests ---
+  // This needs to happen *after* manager initialization
+  let createdDefaultLibrary: Library;
+  try {
+      createdDefaultLibrary = await libraryManager.createLibrary(DEFAULT_TEST_LIBRARY_NAME, 'Default library for query tests');
+  } catch (error: any) {
+      // Handle potential race condition or existing library if tests run concurrently/fail uncleanly
+      if (error.message?.includes('already exists')) {
+          console.warn(`Test library "${DEFAULT_TEST_LIBRARY_NAME}" already existed. Fetching it.`);
+          const libs = await libraryManager.getLibraries();
+          const existingLib = libs.find(l => l.name === DEFAULT_TEST_LIBRARY_NAME);
+          if (!existingLib) throw new Error("Failed to create or find default test library.");
+          createdDefaultLibrary = existingLib;
+      } else {
+          throw error; // Re-throw other errors
+      }
+  }
+  const defaultLibraryId = createdDefaultLibrary.id;
+  // -----------------------------------------
 
   // Decorate the app instance
-  app.decorate('libraryManager', libraryManager);
-  app.decorate('queryManager', queryManager);
+  app.decorate('libraryManager', libraryManager); // Keep decoration if routes use it
+  // Removed: app.decorate('queryManager', queryManager);
 
   // Register only the query routes
   await app.register(registerQueryRoutes);
 
   await app.ready(); // Ensure all plugins are loaded
 
-  return app;
+  // Return the app instance and other relevant objects
+  // Removed queryManager from return object
+  return { app, libraryManager, defaultLibraryId };
 }
 
 
 describe('Query Routes Tests (Inject)', () => {
   let app: FastifyInstance;
+  let libraryManager: LibraryManager; // To access manager directly if needed
+  // defaultTestLibraryId is now created within buildTestApp
 
   beforeEach(async () => {
-    // Build a fresh app instance for each test
-    app = await buildTestApp();
-
-    // --- Create a default library ID for query tests ---
-    // We need an active library for most query operations, but set it per-test
-    const createLibResponse = await app.libraryManager.createLibrary(DEFAULT_TEST_LIBRARY_NAME); // Corrected: Pass name directly
-    defaultTestLibraryId = createLibResponse.id;
-    // Do NOT set current library globally here anymore
-    // ---------------------------------------------------------
+    // Build a fresh app instance and get managers/default ID for each test
+    const buildResult = await buildTestApp();
+    app = buildResult.app;
+    libraryManager = buildResult.libraryManager; // Get manager instance
+    defaultTestLibraryId = buildResult.defaultLibraryId; // Get the ID created in setup
   });
 
   afterEach(async () => {
@@ -92,28 +112,29 @@ describe('Query Routes Tests (Inject)', () => {
     await app.close();
     // Clean up the temporary storage files
     try {
-      fs.unlinkSync(TEST_QUERY_STORAGE_PATH);
+      // Only need to clean up the single library storage file now
+      // fs.unlinkSync(TEST_QUERY_STORAGE_PATH); // Removed
       fs.unlinkSync(TEST_LIB_STORAGE_PATH);
     } catch (err) {
-      // Ignore errors (e.g., file not found)
+      // Ignore errors
     }
   });
 
   // --- Test cases ---
 
-  it('should create a query in the active library', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+  it('should create a query in the specified library', async () => {
+    // No need to set current library
     const queryName = 'testQueryCreate';
     const queryText = 'SELECT * WHERE { ?s ?p ?o } LIMIT 10';
     const response = await app.inject({
       method: 'POST',
-      url: '/queries', // Corrected URL
+      url: '/queries',
       payload: {
+        libraryId: defaultTestLibraryId, // Pass library ID in payload
         name: queryName,
         query: queryText,
         description: 'A test query'
       },
-      // No need for JSON.stringify or Content-Type with inject payload object
     });
 
     expect(response.statusCode).toBe(201);
@@ -123,65 +144,49 @@ describe('Query Routes Tests (Inject)', () => {
     expect(body.name).toBe(queryName);
     expect(body.query).toBe(queryText);
     expect(body.description).toBe('A test query');
-    // Removed: expect(body.libraryId).toBe(defaultTestLibraryId);
+    // Cannot easily verify libraryId without fetching the library again
   });
 
-  it('should not create a query if no library is active', async () => {
-      // Delete the 'default' library created during initialization to ensure no active library
-      const defaultLib = app.libraryManager.getLibraries().find(lib => lib.name === 'default');
-      if (defaultLib) {
-          await app.libraryManager.deleteLibrary(defaultLib.id);
-      }
-      // Now, intentionally do NOT call setCurrentLibrary for this test
+  // REMOVED: 'should not create a query if no library is active' test case
 
-      const response = await app.inject({
-          method: 'POST',
-          url: '/queries',
-          payload: { name: 'no-lib-query', query: 'SELECT 1' },
-      });
-      expect(response.statusCode).toBe(400); // Expect error due to no active library
-      const body = JSON.parse(response.body);
-      expect(body.error).toContain('No active library set');
-  });
-
-  it('should list queries for the active library', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
-    // First, create a query in the active library
+  it('should list queries for the specified library', async () => {
+    // No need to set current library
+    // First, create a query in the target library
     const queryName = 'testQueryList';
     const queryText = 'SELECT ?s WHERE { ?s ?p ?o }';
     const createResponse = await app.inject({
       method: 'POST',
       url: '/queries',
-      payload: { name: queryName, query: queryText },
+      payload: { libraryId: defaultTestLibraryId, name: queryName, query: queryText }, // Specify library
     });
     expect(createResponse.statusCode).toBe(201);
     const createdQuery = JSON.parse(createResponse.body) as StoredQuery;
 
-    // Then, list the queries
+    // Then, list the queries for that library
     const listResponse = await app.inject({
       method: 'GET',
-      url: '/queries', // Corrected URL
+      url: `/queries?libraryId=${defaultTestLibraryId}`, // Pass libraryId as query param
     });
 
     expect(listResponse.statusCode).toBe(200);
     const body = JSON.parse(listResponse.body) as ListQueriesResponse;
 
-    // Check structure based on src/server/query.ts
     expect(body).toHaveProperty('data');
     expect(body).toHaveProperty('metadata');
     expect(Array.isArray(body.data)).toBe(true);
-    expect(body.metadata.total).toBeGreaterThanOrEqual(1); // Should have at least the one we created
+    expect(body.metadata.total).toBeGreaterThanOrEqual(1);
 
-    // Verify the created query is present in the data array
     expect(body.data.some(q => q.id === createdQuery.id && q.name === queryName && q.query === queryText)).toBe(true);
   });
 
-  it('should return an empty data array when the active library has no queries', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
-    // The beforeEach creates a library, but we haven't added queries yet in *this* test
+  it('should return an empty data array when listing queries for a library with no queries', async () => {
+    // No need to set current library
+    // Create a new empty library for this test
+    const emptyLib = await libraryManager.createLibrary('empty-test-lib');
+
     const listResponse = await app.inject({
       method: 'GET',
-      url: '/queries',
+      url: `/queries?libraryId=${emptyLib.id}`, // Use the new empty library's ID
     });
 
     expect(listResponse.statusCode).toBe(200);
@@ -191,23 +196,23 @@ describe('Query Routes Tests (Inject)', () => {
   });
 
 
-  it('should get a specific query by ID from the active library', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+  it('should get a specific query by ID (assuming ID is globally unique)', async () => {
+    // No need to set current library
     // First, create a query
     const queryName = 'testGetQuery';
     const queryText = 'SELECT DISTINCT ?p WHERE { ?s ?p ?o }';
     const createResponse = await app.inject({
       method: 'POST',
       url: '/queries',
-      payload: { name: queryName, query: queryText },
+      payload: { libraryId: defaultTestLibraryId, name: queryName, query: queryText }, // Specify library
     });
     expect(createResponse.statusCode).toBe(201);
     const createdQuery = JSON.parse(createResponse.body) as StoredQuery;
 
-    // Then, get the query by its ID
+    // Then, get the query by its ID (route doesn't need libraryId if queryId is unique)
     const getResponse = await app.inject({
       method: 'GET',
-      url: `/queries/${createdQuery.id}`, // Use the ID from the created query
+      url: `/queries/${createdQuery.id}`,
     });
 
     expect(getResponse.statusCode).toBe(200);
@@ -215,11 +220,10 @@ describe('Query Routes Tests (Inject)', () => {
     expect(body.id).toBe(createdQuery.id);
     expect(body.name).toBe(queryName);
     expect(body.query).toBe(queryText);
-    // Removed: expect(body.libraryId).toBe(defaultTestLibraryId);
   });
 
   it('should return 404 when getting a non-existent query ID', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+    // No need to set current library
     const getResponse = await app.inject({
       method: 'GET',
       url: '/queries/non-existent-query-id',
@@ -228,28 +232,28 @@ describe('Query Routes Tests (Inject)', () => {
   });
 
 
-  it('should update a query in the active library', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+  it('should update a query (assuming ID is globally unique)', async () => {
+    // No need to set current library
     // First, create a query
     const originalName = 'queryToUpdate';
-    const originalQuery = 'SELECT * WHERE { ?s ?p ?o }'; // Added WHERE
+    const originalQuery = 'SELECT * WHERE { ?s ?p ?o }';
     const createResponse = await app.inject({
       method: 'POST',
       url: '/queries',
-      payload: { name: originalName, query: originalQuery },
+      payload: { libraryId: defaultTestLibraryId, name: originalName, query: originalQuery }, // Specify library
     });
     expect(createResponse.statusCode).toBe(201);
     const createdQuery = JSON.parse(createResponse.body) as StoredQuery;
 
-    // Then, update the query
+    // Then, update the query (route doesn't need libraryId if queryId is unique)
     const updatedName = 'queryWasUpdated';
-    // Use a valid query for variable detection
     const updatedQueryText = 'PREFIX ex: <http://example.org/> SELECT (COUNT(?s) AS ?count) WHERE { ?s ex:p ?o }';
     const updatedDescription = 'Now with description';
     const updateResponse = await app.inject({
       method: 'PUT',
       url: `/queries/${createdQuery.id}`,
       payload: {
+        // No libraryId needed in payload if queryId is unique and manager handles finding it
         name: updatedName,
         query: updatedQueryText,
         description: updatedDescription
@@ -262,7 +266,6 @@ describe('Query Routes Tests (Inject)', () => {
     expect(updatedBody.name).toBe(updatedName);
     expect(updatedBody.query).toBe(updatedQueryText);
     expect(updatedBody.description).toBe(updatedDescription);
-    // Removed: expect(updatedBody.libraryId).toBe(defaultTestLibraryId);
 
     // Optional: Verify update persists by getting again
     const getResponse = await app.inject({ method: 'GET', url: `/queries/${createdQuery.id}` });
@@ -271,45 +274,40 @@ describe('Query Routes Tests (Inject)', () => {
     expect(getBody.query).toBe(updatedQueryText);
    });
 
-   it('should return 500 when trying to update a non-existent query', async () => { // Corrected expectation based on route code
-        await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+   it('should return 404 when trying to update a non-existent query', async () => { // Expect 404 if manager returns null
+        // No need to set current library
         const updateResponse = await app.inject({
             method: 'PUT',
             url: '/queries/non-existent-for-update',
             payload: { name: 'update-fail', query: 'SELECT 1' },
         });
-        // The manager throws, which might result in 500 if not caught, or 404 if caught.
-        // Based on query.ts, it seems updateQuery throws, leading to 500. Let's check that.
-        // Update: Looking at query.ts again, the catch block handles the error.
-        // Let's assume the manager throws a specific error that gets mapped.
-        // If updateQuery returns null/throws 'not found', it should be 404 or 500.
-        // The manager code likely throws, leading to the catch block in the route.
-        expect(updateResponse.statusCode).toBe(500);
-        const body = JSON.parse(updateResponse.body);
-        // Expect the specific error message from the manager
-        expect(body.error).toMatch(/Query with ID non-existent-for-update not found in library/);
+        // Assuming the route handler checks the result of manager.updateQuery
+        // and returns 404 if it's null (query not found).
+        expect(updateResponse.statusCode).toBe(404);
+        // const body = JSON.parse(updateResponse.body);
+        // expect(body.error).toMatch(/Query not found/); // Or similar
     });
 
 
-  it('should delete a query from the active library', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+  it('should delete a query (assuming ID is globally unique)', async () => {
+    // No need to set current library
     // First, create a query
      const queryNameToDelete = 'deleteMeQuery';
     const createResponse = await app.inject({
       method: 'POST',
       url: '/queries',
-      payload: { name: queryNameToDelete, query: 'SELECT 1' },
+      payload: { libraryId: defaultTestLibraryId, name: queryNameToDelete, query: 'SELECT 1' }, // Specify library
     });
     expect(createResponse.statusCode).toBe(201);
     const createdQuery = JSON.parse(createResponse.body) as StoredQuery;
 
-    // Then, delete the query
+    // Then, delete the query (route doesn't need libraryId if queryId is unique)
     const deleteResponse = await app.inject({
       method: 'DELETE',
       url: `/queries/${createdQuery.id}`,
     });
 
-    expect(deleteResponse.statusCode).toBe(204); // No content on successful delete
+    expect(deleteResponse.statusCode).toBe(204);
 
     // Verify that the query is no longer found
     const getResponse = await app.inject({
@@ -318,25 +316,25 @@ describe('Query Routes Tests (Inject)', () => {
     });
     expect(getResponse.statusCode).toBe(404);
 
-     // Verify it's not in the list anymore
-    const listResponse = await app.inject({ method: 'GET', url: '/queries' });
+     // Verify it's not in the list for that library anymore
+    const listResponse = await app.inject({ method: 'GET', url: `/queries?libraryId=${defaultTestLibraryId}` });
     const listBody = JSON.parse(listResponse.body) as ListQueriesResponse;
     expect(listBody.data.some(q => q.id === createdQuery.id)).toBe(false);
   });
 
   it('should return 404 when deleting a non-existent query', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+    // No need to set current library
     const deleteResponse = await app.inject({
       method: 'DELETE',
       url: '/queries/non-existent-to-delete',
     });
-    // Based on query.ts, deleteQuery returns false if not found, leading to 404
+    // Assuming route handler checks manager.deleteQuery result
     expect(deleteResponse.statusCode).toBe(404);
   });
 
 
-  it('should list variables in a query', async () => {
-    await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+  it('should list variables in a query (assuming ID is globally unique)', async () => {
+    // No need to set current library
     // QueryManager extracts variables on create/update. Use valid SPARQL.
     const queryTextWithVars = `
       PREFIX schema: <http://schema.org/>
@@ -355,12 +353,13 @@ describe('Query Routes Tests (Inject)', () => {
     const createResponse = await app.inject({
       method: 'POST',
       url: '/queries',
-      payload: { name: 'queryWithVars', query: queryTextWithVars },
+      payload: { libraryId: defaultTestLibraryId, name: 'queryWithVars', query: queryTextWithVars }, // Specify library
     });
     expect(createResponse.statusCode).toBe(201);
     const createdQuery = JSON.parse(createResponse.body) as StoredQuery;
 
     // Then, list the variables
+    // Then, list the variables (route doesn't need libraryId if queryId is unique)
     const variablesResponse = await app.inject({
       method: 'GET',
       url: `/queries/${createdQuery.id}/variables`,
@@ -375,17 +374,18 @@ describe('Query Routes Tests (Inject)', () => {
     expect(receivedVarNames.length).toBe(3); // Ensure no extras like 'person'
   });
 
-  it('should return empty array for variables if query has none or is invalid', async () => {
-     await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+  it('should return empty array for variables if query has none', async () => {
+     // No need to set current library
      const queryTextNoVars = 'SELECT * WHERE { <ex:s> <ex:p> <ex:o> }';
     const createResponse = await app.inject({
       method: 'POST',
       url: '/queries',
-      payload: { name: 'queryNoVars', query: queryTextNoVars },
+      payload: { libraryId: defaultTestLibraryId, name: 'queryNoVars', query: queryTextNoVars }, // Specify library
     });
      expect(createResponse.statusCode).toBe(201);
     const createdQuery = JSON.parse(createResponse.body) as StoredQuery;
 
+    // Get variables (route doesn't need libraryId if queryId is unique)
     const variablesResponse = await app.inject({
       method: 'GET',
       url: `/queries/${createdQuery.id}/variables`,
@@ -397,7 +397,7 @@ describe('Query Routes Tests (Inject)', () => {
   });
 
   it('should return 404 when listing variables for non-existent query', async () => {
-     await app.libraryManager.setCurrentLibrary(defaultTestLibraryId); // Set active library for this test
+     // No need to set current library
      const variablesResponse = await app.inject({
       method: 'GET',
       url: '/queries/non-existent-vars/variables',
@@ -406,7 +406,7 @@ describe('Query Routes Tests (Inject)', () => {
   });
 
 
-  // TODO: Test for execute query requires mocking 'executeQuery' or setting up a backend
+  // TODO: Test for execute query requires mocking 'executeQuery' or setting up a backend/storage for it
   it.todo('should execute a query with variables');
   /*
   it('should attempt to execute a query (mocked backend)', async () => {

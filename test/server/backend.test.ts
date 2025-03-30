@@ -1,8 +1,10 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import * as fs from 'fs';
 import * as path from 'path';
-import { registerBackendRoutes, backendState } from '../../src/server/backend'; // Import routes and the state
-import { Backend, BackendState } from '../../src/types'; // Import types
+import { registerBackendRoutes } from '../../src/server/backend'; // Only import routes
+// Import storage and types
+import { FileSystemBackendStorage, IBackendStorage } from '../../src/server/backendStorage';
+import { Backend } from '../../src/types'; // Removed BackendState
 
 // Paths for temporary test storage files
 const TEST_BACKEND_STORAGE_PATH = path.join(__dirname, 'test-backends-inject.json');
@@ -15,14 +17,13 @@ async function buildTestApp(): Promise<FastifyInstance> {
   // Use temporary copy for test isolation
   fs.copyFileSync(EMPTY_BACKENDS_PATH, TEST_BACKEND_STORAGE_PATH);
 
-  // --- Crucial Step: Override the imported backendState ---
-  // Read the state from the temporary file and assign it directly
-  // This isolates the test from the production backends.json
-  const testStateData = fs.readFileSync(TEST_BACKEND_STORAGE_PATH, 'utf-8');
-  const testState: BackendState = JSON.parse(testStateData);
-  // Directly modify the exported variable from the backend module
-  Object.assign(backendState, testState);
-  // ---------------------------------------------------------
+  // --- Create test-specific storage instance ---
+  const backendStorage: IBackendStorage = new FileSystemBackendStorage(TEST_BACKEND_STORAGE_PATH);
+  // No need to manipulate global state anymore
+  // ---------------------------------------------
+
+  // Decorate the app instance with the storage
+  app.decorate('backendStorage', backendStorage);
 
   // Register only the backend routes
   await app.register(registerBackendRoutes);
@@ -47,18 +48,12 @@ describe('Backend Routes Tests (Inject)', () => {
     try {
       fs.unlinkSync(TEST_BACKEND_STORAGE_PATH);
     } catch (err) {
-      // Ignore errors (e.g., file not found)
+      // Ignore errors
     }
-    // --- Important: Reset backendState after test to avoid side effects ---
-    // Reload from the original file or set to a known default if necessary
-    // For simplicity here, we'll just reset to empty, assuming tests don't overlap badly
-    // A more robust solution might involve mocking fs.readFileSync/writeFileSync
-    // or properly reloading the original state.
-    Object.assign(backendState, { currentBackend: null, backends: [] });
-    // ----------------------------------------------------------------------
+    // No need to reset global state
   });
 
-  it('should add a backend', async () => {
+  it('should add a backend and return it (excluding credentials)', async () => {
     const backendName = 'wikidata-test';
     const backendEndpoint = 'https://query.wikidata.org/sparql';
     const response = await app.inject({
@@ -70,19 +65,19 @@ describe('Backend Routes Tests (Inject)', () => {
       }
     });
 
-    expect(response.statusCode).toBe(200); // Route returns 200 on success
-    const body = JSON.parse(response.payload);
+    expect(response.statusCode).toBe(201); // Expect 201 Created
+    const body = JSON.parse(response.payload) as Partial<Backend>; // Use Partial for safety
     expect(body).toHaveProperty('id');
     expect(typeof body.id).toBe('string');
+    expect(body.name).toBe(backendName);
+    expect(body.endpoint).toBe(backendEndpoint);
+    expect(body).not.toHaveProperty('username'); // Ensure credentials aren't returned
+    expect(body).not.toHaveProperty('password');
 
-    // Verify state (optional but good practice)
-    const addedBackend = backendState.backends.find(b => b.id === body.id);
-    expect(addedBackend).toBeDefined();
-    expect(addedBackend?.name).toBe(backendName);
-    expect(addedBackend?.endpoint).toBe(backendEndpoint);
+    // Verification via API is preferred over checking internal state
   });
 
-  it('should list backends (excluding credentials)', async () => {
+   it('should list backends (excluding credentials)', async () => {
     // First, add a backend
     const backendName = 'dbpedia-test';
     const backendEndpoint = 'https://dbpedia.org/sparql';
@@ -96,10 +91,11 @@ describe('Backend Routes Tests (Inject)', () => {
         password: 'pass'
       }
     });
-    expect(addResponse.statusCode).toBe(200);
-    const { id } = JSON.parse(addResponse.payload);
+    expect(addResponse.statusCode).toBe(201); // Should be 201
+    const addedBackend = JSON.parse(addResponse.payload) as Backend;
+    const id = addedBackend.id; // Get ID from response
 
-    // Then, list the backends
+     // Then, list the backends
     const listResponse = await app.inject({
       method: 'GET',
       url: '/backends', // Corrected URL
@@ -131,7 +127,7 @@ describe('Backend Routes Tests (Inject)', () => {
       url: '/backends',
       payload: { name: backendName, endpoint: backendEndpoint, username: 'test', password: 'pwd' }
     });
-    expect(addResponse.statusCode).toBe(200);
+    expect(addResponse.statusCode).toBe(201); // Corrected expectation to 201 Created
     const { id } = JSON.parse(addResponse.payload);
 
     // Then, get the backend by ID
@@ -157,76 +153,50 @@ describe('Backend Routes Tests (Inject)', () => {
     expect(getResponse.statusCode).toBe(404);
   });
 
+  // REMOVED tests for PUT /backends/current and GET /backends/current
 
-  it('should set the current backend', async () => {
-    // First, add a backend
-    const backendName = 'current-test';
-    const backendEndpoint = 'https://current.example.com/sparql';
+  it('should update a backend', async () => {
+     // First, add a backend
+    const backendName = 'update-test';
+    const backendEndpoint = 'https://update.example.com/sparql';
     const addResponse = await app.inject({
       method: 'POST',
       url: '/backends',
       payload: { name: backendName, endpoint: backendEndpoint }
     });
-    expect(addResponse.statusCode).toBe(200);
-    const { id } = JSON.parse(addResponse.payload);
+    expect(addResponse.statusCode).toBe(201);
+    const addedBackend = JSON.parse(addResponse.payload) as Backend;
+    const id = addedBackend.id;
 
-    // Then, set the backend as current
-    const setResponse = await app.inject({
-      method: 'PUT', // Corrected method
-      url: '/backends/current', // Corrected URL
-      payload: { id: id } // Corrected payload
+    // Then, update it
+    const updatedName = 'updated-name';
+    const updatedDesc = 'Now has description';
+    const updateResponse = await app.inject({
+        method: 'PUT',
+        url: `/backends/${id}`,
+        payload: { name: updatedName, description: updatedDesc } // Partial update
     });
+    expect(updateResponse.statusCode).toBe(200);
+    const updatedBody = JSON.parse(updateResponse.payload) as Partial<Backend>;
+    expect(updatedBody.id).toBe(id);
+    expect(updatedBody.name).toBe(updatedName);
+    expect(updatedBody.description).toBe(updatedDesc);
+    expect(updatedBody.endpoint).toBe(backendEndpoint); // Endpoint should remain unchanged
 
-    expect(setResponse.statusCode).toBe(200); // Route returns 200 on success
-    expect(JSON.parse(setResponse.payload)).toEqual({ success: true });
-
-    // Verify state
-    expect(backendState.currentBackend).toBe(id);
+    // Verify by getting again
+    const getResponse = await app.inject({ method: 'GET', url: `/backends/${id}` });
+    const getBody = JSON.parse(getResponse.payload) as Partial<Backend>;
+    expect(getBody.name).toBe(updatedName);
+    expect(getBody.description).toBe(updatedDesc);
   });
 
-   it('should return 404 when setting a non-existent backend as current', async () => {
-    const setResponse = await app.inject({
-      method: 'PUT',
-      url: '/backends/current',
-      payload: { id: 'non-existent-set-id' }
+   it('should return 404 when updating a non-existent backend', async () => {
+    const updateResponse = await app.inject({
+        method: 'PUT',
+        url: '/backends/non-existent-update-id',
+        payload: { name: 'wont-work' }
     });
-    expect(setResponse.statusCode).toBe(404);
-  });
-
-  it('should get the current backend (excluding credentials)', async () => {
-    // Add and set a backend
-    const backendName = 'get-current-test';
-    const backendEndpoint = 'https://get-current.example.com/sparql';
-    const addResponse = await app.inject({
-      method: 'POST',
-      url: '/backends',
-      payload: { name: backendName, endpoint: backendEndpoint, username: 'user', password: 'password' }
-    });
-    const { id } = JSON.parse(addResponse.payload);
-    await app.inject({ method: 'PUT', url: '/backends/current', payload: { id: id } });
-
-    // Get the current backend
-    const getResponse = await app.inject({
-      method: 'GET',
-      url: '/backends/current',
-    });
-
-    expect(getResponse.statusCode).toBe(200);
-    const currentBackend = JSON.parse(getResponse.payload) as Partial<Backend>;
-    expect(currentBackend.id).toBe(id);
-    expect(currentBackend.name).toBe(backendName);
-    expect(currentBackend.endpoint).toBe(backendEndpoint);
-    expect(currentBackend).not.toHaveProperty('username');
-    expect(currentBackend).not.toHaveProperty('password');
-  });
-
-  it('should return 404 when getting current backend if none is set', async () => {
-    // Ensure no backend is set (should be default state after beforeEach)
-    const getResponse = await app.inject({
-      method: 'GET',
-      url: '/backends/current',
-    });
-    expect(getResponse.statusCode).toBe(404);
+    expect(updateResponse.statusCode).toBe(404);
   });
 
 
@@ -239,17 +209,17 @@ describe('Backend Routes Tests (Inject)', () => {
       url: '/backends',
       payload: { name: backendName, endpoint: backendEndpoint }
     });
-    expect(addResponse.statusCode).toBe(200);
-    const { id } = JSON.parse(addResponse.payload);
+    expect(addResponse.statusCode).toBe(201); // Should be 201
+    const addedBackend = JSON.parse(addResponse.payload) as Backend;
+    const id = addedBackend.id; // Get ID from response
 
-    // Then, delete the backend
+     // Then, delete the backend
     const deleteResponse = await app.inject({
       method: 'DELETE',
-      url: `/backends/${id}`, // Corrected URL
+      url: `/backends/${id}`,
     });
 
-    expect(deleteResponse.statusCode).toBe(200); // Route returns 200 on success
-    expect(JSON.parse(deleteResponse.payload)).toEqual({ success: true });
+    expect(deleteResponse.statusCode).toBe(204); // Expect 204 No Content
 
     // Verify that the backend is no longer in the list
     const listResponse = await app.inject({
@@ -260,19 +230,17 @@ describe('Backend Routes Tests (Inject)', () => {
     const backends = JSON.parse(listResponse.payload) as Backend[];
     expect(backends.find(b => b.id === id)).toBeUndefined();
 
-    // Verify state
-    expect(backendState.backends.find(b => b.id === id)).toBeUndefined();
+    // No need to verify internal state
   });
 
-  it('should return success when deleting a non-existent backend (idempotent)', async () => {
+  it('should return 404 when deleting a non-existent backend', async () => {
     // Attempt to delete an ID that doesn't exist
     const deleteResponse = await app.inject({
       method: 'DELETE',
       url: `/backends/non-existent-delete-id`,
     });
 
-    // The route doesn't check if the ID existed, it just filters the array
-    expect(deleteResponse.statusCode).toBe(200);
-    expect(JSON.parse(deleteResponse.payload)).toEqual({ success: true });
-  });
+    // The refactored route returns 404 if deleteBackend returns false
+    expect(deleteResponse.statusCode).toBe(404);
+   });
 });

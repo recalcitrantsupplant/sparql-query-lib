@@ -1,15 +1,22 @@
 import { request } from 'undici';
-import { backendState } from './backend';
+// Removed: import { backendState } from './backend';
 import { SparqlQueryParser } from '../lib/parser';
 import { config } from './config';
+import { IBackendStorage } from './backendStorage'; // Added storage interface
 
-export async function executeQuery(sparqlQuery: string, variables: { [variable: string]: any } = {}, backendId?: string) {
-  const backend = backendId
-    ? backendState.backends.find(b => b.id === backendId)
-    : backendState.backends.find(b => b.id === backendState.currentBackend);
+// Updated function signature
+export async function executeQuery(
+    backendStorage: IBackendStorage, // Added storage parameter
+    sparqlQuery: string,
+    backendId: string, // Made backendId required
+    variables: { [variable: string]: any } = {}
+) {
+  // Fetch backend using the provided storage instance and ID
+  const backend = await backendStorage.getBackendById(backendId);
 
   if (!backend) {
-    throw new Error(`Backend "${backendId || backendState.currentBackend}" not found`);
+    // Updated error message
+    throw new Error(`Backend "${backendId}" not found`);
   }
 
   try {

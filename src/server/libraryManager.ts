@@ -1,259 +1,135 @@
 import { randomUUID } from 'crypto';
-import { Library, StoredQuery } from '../types'; // Import StoredQuery
-import { IQueryStorage } from './queryStorage';
+import { Library, StoredQuery } from '../types';
+import { ILibraryStorage } from './libraryStorage'; // Updated import path and interface name
 
 export class LibraryManager {
-    private libraries: Library[] = [];
-    private currentLibrary: string | null = 'default'; // Allow null, initialize with default name
-    private storage: IQueryStorage;
+    // Libraries are now primarily managed by the storage layer.
+    // We might keep a cache, but for simplicity now, we'll fetch when needed.
+    // private libraries: Library[] = []; // Removed in-memory cache for now
+    private storage: ILibraryStorage; // Use the new interface
 
-    constructor(storage: IQueryStorage) {
+    constructor(storage: ILibraryStorage) { // Update constructor parameter type
         this.storage = storage;
     }
 
     /**
-     * Loads libraries from storage. Should be called before other methods.
+    /**
+     * Optional: Pre-load or check storage status if needed during initialization.
+     * For now, initialization might just involve ensuring the storage is ready.
+     * The concept of a 'default' library creation might move elsewhere or be handled
+     * by the storage implementation if the file doesn't exist.
      */
     async initialize(): Promise<void> {
         try {
-            this.libraries = await this.storage.loadQueries();
-            // Ensure there's at least a default library if storage is empty
-            if (this.libraries.length === 0) {
-                console.log('No libraries found in storage, creating default library.');
-                const defaultLib: Library = { id: 'default-id', name: 'default', queries: [] };
-                this.libraries.push(defaultLib);
-                // Optionally save the newly created default library immediately
-                // await this.storage.saveQueries(this.libraries);
-            } else {
-                 // Set current library to the first one loaded if not default
-                 this.currentLibrary = this.libraries[0].name;
-            }
-            console.log(`LibraryManager initialized. Current library: ${this.currentLibrary}`);
+            // Example: Check if storage is accessible or load initial cache if desired
+            await this.storage.getAllLibraries(); // Example: Trigger initial load/check
+            console.log('LibraryManager initialized. Storage connection verified.');
         } catch (error) {
-            console.error('Failed to initialize LibraryManager:', error);
-            // Start with an empty array or a default one if loading fails
-            this.libraries = [{ id: 'default-id', name: 'default', queries: [] }];
-            this.currentLibrary = 'default'; // Keep initializing with 'default' name
-            // Rethrow or handle as appropriate for the application
-            // throw new Error(`Failed to initialize libraries: ${error instanceof Error ? error.message : error}`);
+            console.error('Failed to initialize LibraryManager or connect to storage:', error);
+            // Depending on requirements, might throw or handle differently
+            throw new Error(`Failed to initialize LibraryManager: ${error instanceof Error ? error.message : error}`);
         }
-    }
-
-    /**
-     * Creates a new library and persists the changes.
-     * Updates in-memory state only on successful persistence.
-     * @param name The name for the new library.
-     */
-    async createLibrary(name: string): Promise<Library> {
-        if (this.libraries.find(lib => lib.name === name)) {
-            throw new Error(`Library "${name}" already exists`);
-        }
-
-        const id = randomUUID().substring(0, 8);
-        const newLibrary: Library = {
-            id,
-            name,
-            queries: []
-        };
-
-        // Create temporary state for saving
-        const librariesToSave = [...this.libraries, newLibrary];
-
-        try {
-            await this.storage.saveQueries(librariesToSave);
-            // If successful, update the actual in-memory cache
-            this.libraries.push(newLibrary);
-            return newLibrary;
-        } catch (error) {
-            console.error(`Failed to save new library ${name}:`, error);
-            // Rollback is implicit as we didn't modify this.libraries yet
-            throw new Error(`Failed to save library: ${error instanceof Error ? error.message : error}`);
-        }
-    }
-
-    /**
-     * Sets the active library by its ID.
-     * @param id The ID of the library to set as current.
-     */
-    async setCurrentLibrary(id: string): Promise<void> {
-        const library = this.libraries.find(lib => lib.id === id);
-        if (!library) {
-            throw new Error(`Library with id "${id}" not found`);
-        }
-        this.currentLibrary = library.name;
-        console.log(`Current library set to: ${this.currentLibrary}`);
-    }
-
-    /**
-     * Gets the name of the currently active library.
-     */
-    getCurrentLibraryName(): string | null {
-        // Ensure libraries are loaded.
-        if (!this.libraries || this.libraries.length === 0) {
-             console.warn('Attempted to get current library name before initialization or when no libraries exist.');
-            return null;
-        }
-        // Check if the currentLibrary name (if not null) still exists
-        if (this.currentLibrary && !this.libraries.some(lib => lib.name === this.currentLibrary)) {
-            // If the current library was deleted or became invalid, reset to the first available name or null
-            this.currentLibrary = this.libraries.length > 0 ? this.libraries[0].name : null;
-            console.warn(`Current library "${this.currentLibrary}" was invalid, reset.`);
-        }
-        // Return the current name (which could be null)
-        return this.currentLibrary;
     }
 
      /**
-     * Gets the ID of the currently active library.
+     * Creates a new library using the storage layer.
+     * @param name The name for the new library.
+     * @param description Optional description.
      */
-    getCurrentLibraryId(): string | null {
-        const currentName = this.getCurrentLibraryName();
-        if (!currentName) return null;
-        const library = this.libraries.find(lib => lib.name === currentName);
-        return library ? library.id : null;
+    async createLibrary(name: string, description?: string): Promise<Library> {
+        // Delegate directly to storage
+        return this.storage.addLibrary({ name, description });
+    }
+
+    // REMOVED: setCurrentLibrary, getCurrentLibraryName, getCurrentLibraryId
+    // These are now concerns of the request/session layer, not the manager.
+
+    /**
+     * Returns all libraries by fetching from the storage layer.
+     */
+    async getLibraries(): Promise<Library[]> {
+        // Delegate directly to storage
+        return this.storage.getAllLibraries();
+    }
+
+     /**
+     * Gets a specific library by ID from the storage layer.
+     * @param id The ID of the library.
+     */
+    async getLibraryById(id: string): Promise<Library | null> {
+        return this.storage.getLibraryById(id);
+    }
+
+    /**
+     * Updates library metadata (name, description).
+     * @param id The ID of the library to update.
+     * @param data Object containing fields to update (e.g., { name: 'New Name' }).
+     */
+    async updateLibrary(id: string, data: Partial<Omit<Library, 'id' | 'queries'>>): Promise<Library | null> {
+        return this.storage.updateLibrary(id, data);
     }
 
 
-    /**
-     * Returns the currently loaded libraries.
-     * Ensures the manager is initialized.
-     */
-    getLibraries(): Library[] {
-        // Ensure libraries are loaded. Initialize guarantees `this.libraries` is an array.
-        if (!this.libraries) {
-             // This case should ideally not happen if initialize is always called.
-            console.error('Attempted to get libraries before initialization or after load failure.');
-            throw new Error('LibraryManager not initialized or failed to load libraries.');
-        }
-        // Return direct reference. Consumers should not modify directly.
-        return this.libraries;
-    }
-
-    // --- Query Management Methods (Handles Persistence) ---
+    // --- Query Management Methods (Delegating to Storage) ---
 
     /**
-     * Adds a query to the specified library and persists all libraries.
-     * Updates in-memory state only on successful persistence.
+     * Adds a query to the specified library using the storage layer.
      * @param libraryId The ID of the target library.
-     * @param query The StoredQuery object to add.
+     * @param queryData Data for the new query (name, description, query text, etc.).
      */
-    async addQueryToLibrary(libraryId: string, query: StoredQuery): Promise<void> {
-        const libraryIndex = this.libraries.findIndex(lib => lib.id === libraryId);
-        if (libraryIndex === -1) {
-            throw new Error(`Library with ID ${libraryId} not found.`);
-        }
-
-        // Create temporary state for saving (deep copy to avoid partial updates on error)
-        const librariesToSave = JSON.parse(JSON.stringify(this.libraries));
-        librariesToSave[libraryIndex].queries.push(query);
-
-        try {
-            await this.storage.saveQueries(librariesToSave);
-            // If successful, update the actual in-memory cache
-            this.libraries[libraryIndex].queries.push(query);
-        } catch (error) {
-            console.error(`Failed to save query ${query.id} to library ${libraryId}:`, error);
-            throw new Error(`Failed to add query to library: ${error instanceof Error ? error.message : error}`);
-        }
+    async addQueryToLibrary(libraryId: string, queryData: Omit<StoredQuery, 'id' | 'createdAt' | 'updatedAt'>): Promise<StoredQuery> {
+        // Delegate directly to storage
+        return this.storage.addQuery(libraryId, queryData);
     }
 
     /**
-     * Updates a query within the specified library and persists all libraries.
-     * Updates in-memory state only on successful persistence.
-     * @param libraryId The ID of the target library.
+     * Updates a query using the storage layer.
+     * Note: The storage layer handles finding the query across libraries.
      * @param queryId The ID of the query to update.
-     * @param updatedQueryData The complete updated StoredQuery object.
+     * @param updatedQueryData Object containing fields to update.
      */
-    async updateQueryInLibrary(libraryId: string, queryId: string, updatedQueryData: StoredQuery): Promise<void> {
-        const libraryIndex = this.libraries.findIndex(lib => lib.id === libraryId);
-        if (libraryIndex === -1) {
-            throw new Error(`Library with ID ${libraryId} not found.`);
-        }
-
-        const queryIndex = this.libraries[libraryIndex].queries.findIndex(q => q.id === queryId);
-        if (queryIndex === -1) {
-            throw new Error(`Query with ID ${queryId} not found in library ${libraryId}.`);
-        }
-
-        // Create temporary state for saving (deep copy)
-        const librariesToSave = JSON.parse(JSON.stringify(this.libraries));
-        librariesToSave[libraryIndex].queries[queryIndex] = updatedQueryData;
-
-        try {
-            await this.storage.saveQueries(librariesToSave);
-            // If successful, update the actual in-memory cache
-            this.libraries[libraryIndex].queries[queryIndex] = updatedQueryData;
-        } catch (error) {
-            console.error(`Failed to save updated query ${queryId} in library ${libraryId}:`, error);
-            throw new Error(`Failed to update query in library: ${error instanceof Error ? error.message : error}`);
-        }
+    async updateQuery(queryId: string, updatedQueryData: Partial<Omit<StoredQuery, 'id' | 'libraryId'>>): Promise<StoredQuery | null> {
+        // Delegate directly to storage
+        return this.storage.updateQuery(queryId, updatedQueryData);
     }
 
     /**
-     * Removes a query from the specified library and persists all libraries.
-     * Updates in-memory state only on successful persistence.
-     * @param libraryId The ID of the target library.
+     * Removes a query using the storage layer.
+     * Note: The storage layer handles finding the query across libraries.
      * @param queryId The ID of the query to remove.
-     * @returns True if the query was found and removal persisted, false otherwise.
+     * @returns True if the query was found and removed, false otherwise.
      */
-    async removeQueryFromLibrary(libraryId: string, queryId: string): Promise<boolean> {
-        const libraryIndex = this.libraries.findIndex(lib => lib.id === libraryId);
-        if (libraryIndex === -1) {
-            console.warn(`Library with ID ${libraryId} not found when removing query ${queryId}`);
-            return false; // Library not found
-        }
-
-        const queryIndex = this.libraries[libraryIndex].queries.findIndex(q => q.id === queryId);
-        if (queryIndex === -1) {
-            return false; // Query not found in the specified library
-        }
-
-        // Create temporary state for saving (deep copy)
-        const librariesToSave = JSON.parse(JSON.stringify(this.libraries));
-        librariesToSave[libraryIndex].queries = librariesToSave[libraryIndex].queries.filter((q: StoredQuery) => q.id !== queryId);
-
-        try {
-            await this.storage.saveQueries(librariesToSave);
-            // If successful, update the actual in-memory cache
-            this.libraries[libraryIndex].queries = this.libraries[libraryIndex].queries.filter(q => q.id !== queryId);
-            return true;
-        } catch (error) {
-            console.error(`Failed to save deletion for query ${queryId} in library ${libraryId}:`, error);
-            throw new Error(`Failed to remove query from library: ${error instanceof Error ? error.message : error}`);
-        }
+    async removeQuery(queryId: string): Promise<boolean> {
+        // Delegate directly to storage
+        return this.storage.deleteQuery(queryId);
     }
 
-    // --- Library Management Methods (Handles Persistence) ---
+    /**
+     * Gets all queries for a specific library from the storage layer.
+     * @param libraryId The ID of the library.
+     */
+    async getQueriesByLibrary(libraryId: string): Promise<StoredQuery[]> {
+        return this.storage.getQueriesByLibraryId(libraryId);
+    }
 
     /**
-     * Deletes a library and persists the changes.
-     * Updates in-memory state only on successful persistence.
+     * Gets a specific query by its ID from the storage layer.
+     * @param queryId The ID of the query.
+     */
+    async getQueryById(queryId: string): Promise<StoredQuery | null> {
+        return this.storage.getQueryById(queryId);
+    }
+
+
+    // --- Library Deletion (Delegating to Storage) ---
+
+    /**
+     * Deletes a library using the storage layer.
      * @param id The ID of the library to delete.
-     * @returns True if the library was found and deletion persisted, false otherwise.
+     * @returns True if the library was found and deleted, false otherwise.
      */
     async deleteLibrary(id: string): Promise<boolean> {
-        const libraryIndex = this.libraries.findIndex(lib => lib.id === id);
-        if (libraryIndex === -1) {
-            return false; // Library not found
-        }
-        const libraryToDelete = this.libraries[libraryIndex]; // Get reference before filtering
-
-        // Create temporary state for saving
-        const librariesToSave = this.libraries.filter(lib => lib.id !== id);
-
-        try {
-            await this.storage.saveQueries(librariesToSave);
-            // If successful, update the actual in-memory cache
-            this.libraries = librariesToSave;
-            // Reset currentLibrary if the deleted one was active
-            if (this.currentLibrary === libraryToDelete.name) {
-                 this.currentLibrary = null; // Set current library name to null
-                 console.log(`Current library reset to: null`);
-            }
-            return true;
-        } catch (error) {
-            console.error(`Failed to save after deleting library ${id}:`, error);
-            throw new Error(`Failed to delete library: ${error instanceof Error ? error.message : error}`);
-        }
+        // Delegate directly to storage
+        return this.storage.deleteLibrary(id);
     }
 }

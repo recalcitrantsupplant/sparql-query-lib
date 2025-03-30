@@ -1,55 +1,21 @@
-import { FastifyInstance, FastifyRequest, FastifyReply, RouteHandler } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import * as dotenv from 'dotenv';
-import fs from 'fs';
-import { randomUUID } from 'crypto';
-import { BackendState, Backend } from '../types';
+import { Backend } from '../types';
+// Import the storage interface
+import { IBackendStorage } from './backendStorage';
 
-const BACKENDS_FILE = 'src/server/backends.json';
-
-function generateId(): string {
-  return randomUUID().substring(0, 8); // Generate a short random ID
-}
-
-function loadBackends(): BackendState {
-  try {
-    const data = fs.readFileSync(BACKENDS_FILE, 'utf-8');
-    const parsedData: BackendState = JSON.parse(data);
-    if (!parsedData.backends || !Array.isArray(parsedData.backends)) {
-      console.warn('Invalid backends.json format: backends is not an array. Initializing with empty backends.');
-      return { currentBackend: null, backends: [] as Backend[] };
-    }
-
-    if (parsedData.currentBackend && !parsedData.backends.find(b => b.id === parsedData.currentBackend)) {
-      console.warn(`Invalid currentBackend ID: ${parsedData.currentBackend}. Setting currentBackend to null.`);
-      return { currentBackend: null, backends: parsedData.backends };
-    }
-
-    return parsedData;
-  } catch (error) {
-    console.error('Error loading backends from file:', error);
-    return {
-      currentBackend: null,
-      backends: [],
-    };
+// Extend FastifyInstance types
+declare module 'fastify' {
+  interface FastifyInstance {
+    backendStorage: IBackendStorage;
+    // libraryManager might also be here from previous steps
   }
 }
-
-function saveBackends(state: BackendState): void {
-  try {
-    fs.writeFileSync(BACKENDS_FILE, JSON.stringify(state, null, 2), 'utf-8');
-  } catch (error) {
-    console.error('Error saving backends to file:', error);
-  }
-}
-
-export let backendState: BackendState = loadBackends();
-
-type ListBackendsRouteHandler = RouteHandler<{
-  Reply: Backend[];
-}>;
 
 export async function registerBackendRoutes(app: FastifyInstance) {
-  dotenv.config();
+  dotenv.config(); // Keep dotenv config if needed elsewhere
+
+  // BackendStorage is now decorated onto the app instance in src/index.ts
 
   // List Backends
   app.get<{ Reply: Backend[] }>(`/backends`, {
@@ -58,15 +24,23 @@ export async function registerBackendRoutes(app: FastifyInstance) {
       operationId: 'listBackends'
     }
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const backends = backendState.backends.map(backend => {
-      const { username, password, ...safeBackend } = backend;
-      return safeBackend;
-    });
-    reply.send(backends);
+    try {
+        const allBackends = await app.backendStorage.getAllBackends();
+        // Exclude sensitive info before sending
+        const safeBackends = allBackends.map(backend => {
+          const { username, password, ...safeBackend } = backend;
+          return safeBackend;
+        });
+        reply.send(safeBackends);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to list backends.';
+        console.error('Error listing backends:', error);
+        reply.status(500).send({ error: errorMessage });
+    }
   });
 
   // Add Backend
-  app.post<{ Body: { name: string; endpoint: string; username?: string; password?: string, description?: string } }>(`/backends`, {
+  app.post<{ Body: Omit<Backend, 'id'> }>(`/backends`, { // Use Omit<Backend, 'id'> for body type
     schema: {
       tags: ['Backend'],
       operationId: 'addBackend',
@@ -77,20 +51,25 @@ export async function registerBackendRoutes(app: FastifyInstance) {
         properties: {
           name: { type: 'string', description: 'The name of the backend' },
           endpoint: { type: 'string', description: 'The SPARQL endpoint URL' },
-          username: { type: 'string', description: 'The username for the SPARQL endpoint' },
-          password: { type: 'string', description: 'The password for the SPARQL endpoint' },
-          description: { type: 'string', description: 'The description of the backend' }
+          username: { type: 'string', description: 'Optional username for the SPARQL endpoint' },
+          password: { type: 'string', description: 'Optional password for the SPARQL endpoint' },
+          description: { type: 'string', description: 'Optional description of the backend' }
         },
         required: ['name', 'endpoint']
       }
     }
-  }, async (request: FastifyRequest<{ Body: { name: string; endpoint: string; username?: string; password?: string, description?: string } }>, reply: FastifyReply) => {
-    const { name, endpoint, username, password, description } = request.body;
-    const id = generateId();
-    const newBackend = { id, name, endpoint, username, password, description };
-    backendState.backends.push(newBackend);
-    saveBackends(backendState);
-    return { id };
+  }, async (request: FastifyRequest<{ Body: Omit<Backend, 'id'> }>, reply: FastifyReply) => {
+    try {
+        // Use backendStorage to add
+        const newBackend = await app.backendStorage.addBackend(request.body);
+        // Return the newly created backend (excluding sensitive info)
+        const { username, password, ...safeBackend } = newBackend;
+        reply.status(201).send(safeBackend); // Return 201 Created
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to add backend.';
+        console.error('Error adding backend:', error);
+        reply.status(500).send({ error: errorMessage });
+    }
   });
 
   // Get Backend by ID
@@ -108,13 +87,60 @@ export async function registerBackendRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
-    const backend = backendState.backends.find(backend => backend.id === id);
-    if (!backend) {
-      return reply.status(404).send({ error: 'Backend not found' });
+    try {
+        const backend = await app.backendStorage.getBackendById(id);
+        if (!backend) {
+          return reply.status(404).send({ error: 'Backend not found' });
+        }
+        // Exclude sensitive info before sending
+        const { username, password, ...safeBackend } = backend;
+        return safeBackend;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to get backend.';
+        console.error(`Error getting backend ${id}:`, error);
+        reply.status(500).send({ error: errorMessage });
     }
-    const { username, password, ...safeBackend } = backend;
-    return safeBackend;
   });
+
+   // Update Backend
+   app.put<{ Params: { id: string }, Body: Partial<Omit<Backend, 'id'>> }>(`/backends/:id`, {
+    schema: {
+      tags: ['Backend'],
+      operationId: 'updateBackend',
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string' } },
+        required: ['id']
+      },
+      body: { // Allow partial updates
+        type: 'object',
+        title: 'UpdateBackendBody',
+        properties: {
+          name: { type: 'string' },
+          endpoint: { type: 'string' },
+          username: { type: 'string', nullable: true }, // Allow null to clear
+          password: { type: 'string', nullable: true }, // Allow null to clear
+          description: { type: 'string', nullable: true } // Allow null to clear
+        },
+        // No required fields, as it's a partial update
+      }
+    }
+  }, async (request: FastifyRequest<{ Params: { id: string }, Body: Partial<Omit<Backend, 'id'>> }>, reply: FastifyReply) => {
+    const { id } = request.params;
+    try {
+        const updatedBackend = await app.backendStorage.updateBackend(id, request.body);
+        if (!updatedBackend) {
+            return reply.status(404).send({ error: 'Backend not found' });
+        }
+        const { username, password, ...safeBackend } = updatedBackend;
+        return safeBackend;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to update backend.';
+        console.error(`Error updating backend ${id}:`, error);
+        reply.status(500).send({ error: errorMessage });
+    }
+  });
+
 
   // Delete Backend
   app.delete<{ Params: { id: string } }>(`/backends/:id`, {
@@ -131,53 +157,24 @@ export async function registerBackendRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
-    backendState.backends = backendState.backends.filter(backend => backend.id !== id);
-    saveBackends(backendState);
-    return { success: true };
+    try {
+        const deleted = await app.backendStorage.deleteBackend(id);
+        if (deleted) {
+            reply.status(204).send(); // Success, no content
+        } else {
+            reply.status(404).send({ error: 'Backend not found' });
+        }
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to delete backend.';
+        console.error(`Error deleting backend ${id}:`, error);
+        reply.status(500).send({ error: errorMessage });
+    }
   });
 
-  // Set Current Backend
-  app.put<{ Body: { id: string } }>(`/backends/current`, {
-    schema: {
-      tags: ['Backend'],
-      operationId: 'setCurrentBackend',
-      body: {
-        type: 'object',
-        title: 'SetBackendBody',
-        description: 'Request body for setting the current SPARQL backend',
-        properties: {
-          id: { type: 'string', description: 'The ID of the backend to set as current' }
-        },
-        required: ['id']
-      }
-    }
-  }, async (request: FastifyRequest<{ Body: { id: string } }>, reply: FastifyReply) => {
-    const { id } = request.body;
-    const backend = backendState.backends.find(backend => backend.id === id);
-    if (!backend) {
-      return reply.status(404).send({ error: 'Backend not found' });
-    }
-    backendState.currentBackend = id;
-    saveBackends(backendState);
-    return { success: true };
-  });
+  // REMOVED: Set Current Backend (PUT /backends/current)
+  // REMOVED: Get Current Backend (GET /backends/current)
+  // The concept of a "current" backend needs to be handled per-request/session,
+  // not as a global state modified via these routes. The query execution logic
+  // will need updating separately to determine which backend to use.
 
-  // Get Current Backend
-  app.get(`/backends/current`, {
-    schema: {
-      tags: ['Backend'],
-      operationId: 'getCurrentBackend'
-    }
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const currentBackendId = backendState.currentBackend;
-    if (!currentBackendId) {
-      return reply.status(404).send({ error: 'No backend set' });
-    }
-    const currentBackend = backendState.backends.find(backend => backend.id === currentBackendId);
-    if (!currentBackend) {
-      return reply.status(404).send({ error: 'Backend not found' });
-    }
-    const { username, password, ...safeBackend } = currentBackend;
-    return safeBackend;
-  });
 }

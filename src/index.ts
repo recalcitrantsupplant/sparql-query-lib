@@ -6,14 +6,18 @@ import { registerLibraryRoutes } from './server/libraries';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
 import fastifyCors from '@fastify/cors';
-import { FileSystemQueryStorage } from './server/queryStorage';
-import { QueryManager } from './server/queryManager';
+// Updated storage imports
+import { FileSystemLibraryStorage } from './server/libraryStorage';
+import { FileSystemBackendStorage, IBackendStorage } from './server/backendStorage';
+// Removed QueryManager import
 import { LibraryManager } from './server/libraryManager';
-import { config } from './server/config'; // Import config
+import { config } from './server/config';
 
+// Update Fastify instance declaration
 declare module 'fastify' {
   interface FastifyInstance {
     libraryManager: LibraryManager;
+    backendStorage: IBackendStorage; // Add backendStorage
   }
 }
 
@@ -59,20 +63,21 @@ const start = async () => {
       staticCSP: false
     });
 
-    // Instantiate storage with the path from config
-    const storage = new FileSystemQueryStorage(config.queriesFilePath);
-    // Instantiate LibraryManager first and initialize it, passing the storage instance
-    const libraryManager = new LibraryManager(storage);
+    // Instantiate storage implementations with paths from config
+    const libraryStorage = new FileSystemLibraryStorage(config.queriesFilePath); // Use new class
+    const backendStorage = new FileSystemBackendStorage(config.backendsFilePath); // Use new class and config path
+
+    // Instantiate LibraryManager and initialize it
+    const libraryManager = new LibraryManager(libraryStorage); // Pass libraryStorage
     await libraryManager.initialize();
 
-    // QueryManager now only needs LibraryManager
-    const queryManager = new QueryManager(libraryManager);
-    // No longer need queryManager.initialize()
+    // QueryManager is no longer needed here as routes use LibraryManager directly
 
+    // Decorate the app instance with managers/storage
     app.decorate('libraryManager', libraryManager);
-    // Decorate queryManager as it's likely needed by query routes
-    app.decorate('queryManager', queryManager);
+    app.decorate('backendStorage', backendStorage); // Decorate backendStorage
 
+    // Register routes
     await app.register(registerBackendRoutes as FastifyPluginAsync);
     await app.register(registerQueryRoutes as FastifyPluginAsync);
     await app.register(registerLibraryRoutes as FastifyPluginAsync);

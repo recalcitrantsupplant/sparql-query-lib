@@ -76,5 +76,6 @@ export interface StoredQuery {
 export interface Library {
     id: string;
     name: string;
+    description?: string; // Added optional description
     queries: StoredQuery[];
 }

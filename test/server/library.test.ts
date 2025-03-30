@@ -3,19 +3,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { registerLibraryRoutes } from '../../src/server/libraries';
 import { LibraryManager } from '../../src/server/libraryManager';
-import { FileSystemQueryStorage, IQueryStorage } from '../../src/server/queryStorage'; // Import IQueryStorage
-// No longer need config here
-// Define interfaces used in tests (copied from library.test.ts for clarity)
+// Updated storage imports
+import { FileSystemLibraryStorage, ILibraryStorage } from '../../src/server/libraryStorage';
+import { Library } from '../../src/types'; // Import Library type
+
+// Define interfaces used in tests
 interface LibrarySummary {
   id: string;
   name: string;
+  description?: string; // Add description if it's part of the summary
 }
 
 interface CreateLibraryResponse extends LibrarySummary {}
 
-interface GetCurrentLibraryResponse {
-  currentLibraryId: string | null;
-}
+// REMOVED: GetCurrentLibraryResponse interface
 
 // Path for the temporary test storage file
 const TEST_STORAGE_PATH = path.join(__dirname, 'test-libraries-inject.json');
@@ -29,7 +30,8 @@ async function buildTestApp(): Promise<FastifyInstance> {
   fs.copyFileSync(EMPTY_STORAGE_PATH, TEST_STORAGE_PATH);
 
   // --- Create test-specific storage instance ---
-  const storage: IQueryStorage = new FileSystemQueryStorage(TEST_STORAGE_PATH);
+  // Use the new interface and implementation
+  const storage: ILibraryStorage = new FileSystemLibraryStorage(TEST_STORAGE_PATH);
   // ---------------------------------------------
 
   // Instantiate LibraryManager with the test storage
@@ -72,12 +74,13 @@ describe('Library Routes Tests (Inject)', () => {
 
   // --- Test cases will go here ---
 
-  it('should create a library', async () => {
+  it('should create a library with name and description', async () => {
     const libraryName = 'library-for-inject-testing';
+    const libraryDesc = 'A test description';
     const response = await app.inject({
       method: 'POST',
       url: '/libraries',
-      payload: { name: libraryName },
+      payload: { name: libraryName, description: libraryDesc }, // Add description
     });
 
     expect(response.statusCode).toBe(201);
@@ -85,7 +88,22 @@ describe('Library Routes Tests (Inject)', () => {
     expect(body).toHaveProperty('id');
     expect(typeof body.id).toBe('string');
     expect(body.name).toBe(libraryName);
+    expect(body.description).toBe(libraryDesc); // Verify description
   });
+
+   it('should create a library with only a name', async () => {
+    const libraryName = 'library-name-only';
+    const response = await app.inject({
+      method: 'POST',
+      url: '/libraries',
+      payload: { name: libraryName },
+    });
+    expect(response.statusCode).toBe(201);
+    const body = JSON.parse(response.body) as CreateLibraryResponse;
+    expect(body.name).toBe(libraryName);
+    expect(body.description).toBeUndefined(); // Expect description to be undefined
+  });
+
 
   it('should not create a library with invalid data (missing name)', async () => {
     const response = await app.inject({
@@ -96,35 +114,31 @@ describe('Library Routes Tests (Inject)', () => {
     expect(response.statusCode).toBe(400);
   });
 
-  // TODO: Add test for creating duplicate library name (expect 409 or 500 depending on implementation)
-  // it('should not create a library with a duplicate name', async () => { ... });
-
-  it('should not set current library with invalid data (missing id)', async () => {
-    const response = await app.inject({
-      method: 'PUT',
-      url: '/libraries/current',
-      payload: {}, // Missing id
-    });
-    expect(response.statusCode).toBe(400);
+  it('should not create a library with a duplicate name', async () => {
+    const libraryName = 'duplicate-lib-test';
+    // Create it once
+    await app.inject({ method: 'POST', url: '/libraries', payload: { name: libraryName } });
+    // Try to create it again
+    const response = await app.inject({ method: 'POST', url: '/libraries', payload: { name: libraryName } });
+    // Expect conflict or internal server error depending on how manager handles it
+    expect([409, 500]).toContain(response.statusCode);
+    // Optionally check error message if status code is 500
+    if (response.statusCode === 500) {
+        const body = JSON.parse(response.body);
+        expect(body.error).toMatch(/already exists/i);
+    }
   });
 
-  it('should not set current library with a non-existent id', async () => {
-    const response = await app.inject({
-      method: 'PUT',
-      url: '/libraries/current',
-      payload: { id: 'non-existent-id' },
-    });
-    // Expect 400 because the manager throws "not found", which the route maps to 400
-    expect(response.statusCode).toBe(400);
-  });
+  // REMOVED tests for PUT /libraries/current and GET /libraries/current
 
   it('should get all libraries and include the created one', async () => {
     // First, create a library to ensure there's one to find
     const libraryName = 'find-me-library';
+    const libraryDesc = 'Description for find-me';
     const createResponse = await app.inject({
       method: 'POST',
       url: '/libraries',
-      payload: { name: libraryName },
+      payload: { name: libraryName, description: libraryDesc },
     });
     expect(createResponse.statusCode).toBe(201);
     const createdLib = JSON.parse(createResponse.body) as CreateLibraryResponse;
@@ -138,48 +152,17 @@ describe('Library Routes Tests (Inject)', () => {
     expect(getResponse.statusCode).toBe(200);
     const libraries = JSON.parse(getResponse.body) as LibrarySummary[];
     expect(Array.isArray(libraries)).toBe(true);
+    // Removed temporary debug logs
     // Verify the created library is present
-    expect(libraries.some(lib => lib.id === createdLib.id && lib.name === libraryName)).toBe(true);
+    expect(libraries.some(lib => lib.id === createdLib.id && lib.name === libraryName && lib.description === libraryDesc)).toBe(true);
   });
 
-  it('should set and get the current library', async () => {
-    // --- Test Setup: Create a dedicated library for this test ---
-    const testLibName = `set-get-test-inject-${Date.now()}`;
-    const createResponse = await app.inject({
-      method: 'POST',
-      url: '/libraries',
-      payload: { name: testLibName },
-    });
-    expect(createResponse.statusCode).toBe(201);
-    const testLib = JSON.parse(createResponse.body) as CreateLibraryResponse;
+  // REMOVED test 'should set and get the current library'
+  // REMOVED test 'should get null when no library is set as current'
 
-    // --- Action 1: Set the library as current ---
-    const setResponse = await app.inject({
-        method: 'PUT',
-        url: '/libraries/current',
-        payload: { id: testLib.id },
-    });
-    expect(setResponse.statusCode).toBe(204); // Verify setting worked
-
-    // --- Action 2: Get the current library ---
-    const getResponse = await app.inject({
-      method: 'GET',
-      url: '/libraries/current',
-    });
-    expect(getResponse.statusCode).toBe(200);
-    const getCurrentData = JSON.parse(getResponse.body) as GetCurrentLibraryResponse;
-
-    // --- Assertion: Verify the correct library ID is returned ---
-    expect(getCurrentData.currentLibraryId).toBe(testLib.id);
-
-    // Note: Cleanup of the created library happens automatically via afterEach's file deletion
-  });
-
-  it('should get null when no library is set as current', async () => {
-    // Strategy: Create temp lib, set current, delete it, check current is null
-
-    // 1. Create temporary library
-    const tempLibName = `temp-lib-inject-${Date.now()}`;
+  it('should delete a library', async () => {
+     // 1. Create temporary library
+    const tempLibName = `delete-lib-inject-${Date.now()}`;
     const createResponse = await app.inject({
         method: 'POST',
         url: '/libraries',
@@ -188,30 +171,19 @@ describe('Library Routes Tests (Inject)', () => {
     expect(createResponse.statusCode).toBe(201);
     const tempLib = JSON.parse(createResponse.body) as CreateLibraryResponse;
 
-    // 2. Set it as current
-    const setResponse = await app.inject({
-        method: 'PUT',
-        url: '/libraries/current',
-        payload: { id: tempLib.id },
-    });
-    expect(setResponse.statusCode).toBe(204);
-
-    // 3. Delete it (this should trigger the manager to reset current library to null)
+    // 2. Delete it
     const deleteResponse = await app.inject({
         method: 'DELETE',
         url: `/libraries/${tempLib.id}`,
     });
-    expect(deleteResponse.statusCode).toBe(204);
+    expect(deleteResponse.statusCode).toBe(204); // Expect success no content
 
-    // 4. Check current library is now null
-    const getResponse = await app.inject({
-      method: 'GET',
-      url: '/libraries/current',
-    });
-    expect(getResponse.statusCode).toBe(200);
-    const getCurrentData = JSON.parse(getResponse.body) as GetCurrentLibraryResponse;
-    expect(getCurrentData.currentLibraryId).toBe(null); // Expect null after deleting the current
+    // 3. Verify it's gone from the list
+     const getResponse = await app.inject({ method: 'GET', url: '/libraries' });
+     const libraries = JSON.parse(getResponse.body) as LibrarySummary[];
+     expect(libraries.some(lib => lib.id === tempLib.id)).toBe(false);
   });
+
 
   it('should return 404 when deleting a non-existent library', async () => {
     const response = await app.inject({

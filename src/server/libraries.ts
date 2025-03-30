@@ -1,6 +1,17 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'; // Import Request/Reply
 import { LibraryManager } from './libraryManager';
-import { FileSystemQueryStorage } from './queryStorage'; // TODO: Remove this
+// Removed FileSystemQueryStorage import
+import { Library } from '../types'; // Import Library type
+
+// Extend FastifyInstance types if not already done globally
+// (Should match declarations in other route files)
+declare module 'fastify' {
+  interface FastifyInstance {
+    libraryManager: LibraryManager;
+    // backendStorage might also be here
+  }
+}
+
 
 export const registerLibraryRoutes = async (app: FastifyInstance) => {
   // Get all libraries
@@ -17,25 +28,32 @@ export const registerLibraryRoutes = async (app: FastifyInstance) => {
             properties: {
               id: { type: 'string' },
               name: { type: 'string' },
+              description: { type: 'string' } // Added optional description to schema
               // queries property might be too large for a list view, omitting for now
             }
           }
         }
       }
     }
-  }, async (request, reply) => {
+  }, async (request: FastifyRequest, reply: FastifyReply) => { // Add types
     try {
-      // Fetch only necessary fields if possible, or filter later
-      const libraries = app.libraryManager.getLibraries().map(lib => ({ id: lib.id, name: lib.name })); // Example: map to simpler objects
-      reply.send(libraries);
+      // Use await as getLibraries is now async
+      const allLibraries = await app.libraryManager.getLibraries();
+      // Map to summary objects, including description if available
+      const librariesSummary = allLibraries.map(lib => ({
+          id: lib.id,
+          name: lib.name,
+          description: lib.description // Include description
+      }));
+      reply.send(librariesSummary);
     } catch (error: any) {
-      console.error('Failed to get libraries:', error);
+       console.error('Failed to get libraries:', error);
       reply.status(500).send({ error: error.message });
     }
   });
 
-  // Create a new library
-  app.post('/libraries', {
+  // Create a new library (allow description)
+  app.post<{ Body: { name: string; description?: string } }>('/libraries', { // Update Body type
     schema: {
       tags: ['Library'],
       operationId: 'createLibrary',
@@ -43,93 +61,44 @@ export const registerLibraryRoutes = async (app: FastifyInstance) => {
         type: 'object',
         required: ['name'],
         properties: {
-          name: { type: 'string', description: 'Name for the new library' }
+          name: { type: 'string', description: 'Name for the new library' },
+          description: { type: 'string', description: 'Optional description for the library' } // Add description
         }
       },
       response: {
         201: {
-          // Assuming Library type has id and name
+          // Response should include description if provided
           type: 'object',
           properties: {
             id: { type: 'string' },
-            name: { type: 'string' }
+            name: { type: 'string' },
+            description: { type: 'string' } // Add description
           }
         }
       }
     }
-  }, async (request, reply) => {
+  }, async (request: FastifyRequest<{ Body: { name: string; description?: string } }>, reply: FastifyReply) => { // Add types
     try {
-      const { name } = request.body as { name: string }; // Type assertion remains
-      const newLibrary = await app.libraryManager.createLibrary(name);
+      const { name, description } = request.body; // Destructure name and description
+      // Pass both name and description to the manager method
+      const newLibrary = await app.libraryManager.createLibrary(name, description);
+      // Return the full library object (which now includes description)
       reply.status(201).send(newLibrary);
     } catch (error: any) {
       console.error('Failed to create library:', error);
-      reply.status(500).send({ error: error.message });
+       // Handle specific errors like duplicate name
+       if (error.message?.includes('already exists')) {
+           reply.status(409).send({ error: error.message }); // 409 Conflict
+       } else {
+           reply.status(500).send({ error: error.message });
+       }
     }
   });
 
-  // Get the currently active library ID
-  app.get('/libraries/current', {
-    schema: {
-      tags: ['Library'],
-      operationId: 'getCurrentLibrary',
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            // Corrected key name to match the actual response
-            currentLibraryId: { type: ['string', 'null'], description: 'ID of the current library, or null if none is set' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const currentLibraryId = app.libraryManager.getCurrentLibraryId(); // Returns ID or null
-      reply.send({ currentLibraryId }); // Use the correct variable name here too
-    } catch (error: any) {
-      console.error('Failed to get current library ID:', error); // Update error message for clarity
-      reply.status(500).send({ error: error.message });
-    }
-  });
+  // REMOVED: GET /libraries/current
+  // REMOVED: PUT /libraries/current
 
-  // Set the currently active library
-  app.put('/libraries/current', {
-    schema: {
-      tags: ['Library'],
-      operationId: 'setCurrentLibrary',
-      body: {
-        type: 'object',
-        required: ['id'],
-        properties: {
-          id: { type: 'string', description: 'ID of the library to set as current' }
-        }
-      },
-      response: {
-        200: { // Note: PUT usually returns 204 No Content on success, not 200 with body
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' } // This response body might not be sent if using 204
-          }
-        },
-        400: { // Add error response schema
-          type: 'object',
-          properties: {
-            error: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { id } = request.body as { id: string }; // Type assertion remains
-      await app.libraryManager.setCurrentLibrary(id);
-      reply.status(204).send(); // Correct status code for successful PUT with no body
-    } catch (error: any) {
-      console.error('Failed to set current library:', error);
-      reply.status(400).send({ error: error.message }); // Use 400 for client errors like 'not found'
-    }
-  });
+   // TODO: Add PUT /libraries/:libraryId route for updating name/description
 
   // Delete a library
   app.delete<{ Params: { libraryId: string } }>('/libraries/:libraryId', {
@@ -162,18 +131,18 @@ export const registerLibraryRoutes = async (app: FastifyInstance) => {
         }
       }
     }
-  }, async (request, reply) => {
+  }, async (request: FastifyRequest<{ Params: { libraryId: string } }>, reply: FastifyReply) => { // Add types
     try {
-      const { libraryId } = request.params; // Parameter access remains
-      const deleted = await app.libraryManager.deleteLibrary(libraryId); // Check boolean result
+      const { libraryId } = request.params;
+      const deleted = await app.libraryManager.deleteLibrary(libraryId);
       if (deleted) {
         reply.status(204).send();
       } else {
-        reply.status(404).send({ error: 'Library not found' }); // Return 404 if not found
+        reply.status(404).send({ error: 'Library not found' });
       }
     } catch (error: any) {
       console.error('Failed to delete library:', error);
-      reply.status(500).send({ error: error.message }); // Keep 500 for unexpected errors
+      reply.status(500).send({ error: error.message });
     }
   });
 };
