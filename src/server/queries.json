@@ -1,38 +1,67 @@
 [
-    {
-      "id": "example",
-      "name": "Example Query",
-      "description": "A simple query that selects all and limits the result to 10.",
-      "query": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nPREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\nSELECT * WHERE {\n  VALUES ?pred { UNDEF }\n  VALUES ( ?sub ?obj ) { ( UNDEF UNDEF ) }\n  ?sub ?pred ?obj .\n} LIMIT 10",
-      "createdAt": "2024-03-22T08:18:00.000Z",
-      "updatedAt": "2024-03-22T08:18:00.000Z",
-      "variables": [
-        {
-          "vars": {
-            "pred": {
-              "type": [
-                "uri",
-                "literal"
-              ]
-            }
-          }
-        },
-        {
-          "vars": {
-            "sub": {
-              "type": [
-                "uri",
-                "literal"
-              ]
-            },
-            "obj": {
-              "type": [
-                "uri",
-                "literal"
-              ]
-            }
+  {
+    "id": "example",
+    "name": "Example Query",
+    "description": "A simple query that selects all and limits the result to 10.",
+    "query": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nPREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\nSELECT * WHERE {\n  VALUES ?pred { UNDEF }\n  VALUES ( ?sub ?obj ) { ( UNDEF UNDEF ) }\n  ?sub ?pred ?obj .\n} LIMIT 10",
+    "createdAt": "2024-03-22T08:18:00.000Z",
+    "updatedAt": "2024-03-22T08:18:00.000Z",
+    "variables": [
+      {
+        "vars": {
+          "pred": {
+            "type": [
+              "uri",
+              "literal"
+            ]
           }
         }
-      ]
-    }
+      },
+      {
+        "vars": {
+          "sub": {
+            "type": [
+              "uri",
+              "literal"
+            ]
+          },
+          "obj": {
+            "type": [
+              "uri",
+              "literal"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "e7fd4c4f",
+    "name": "string",
+    "description": "string",
+    "query": "SELECT * {?s ?p ?o}",
+    "variables": [],
+    "createdAt": "2025-03-26T12:02:32.041Z",
+    "updatedAt": "2025-03-26T12:02:32.041Z"
+  },
+  {
+    "id": "494048db",
+    "name": "query2",
+    "description": "string",
+    "query": "SELECT * {?s ?p ?o . VALUES ?p {UNDEF}}",
+    "variables": [
+      {
+        "vars": {
+          "p": {
+            "type": [
+              "uri",
+              "literal"
+            ]
+          }
+        }
+      }
+    ],
+    "createdAt": "2025-03-26T12:03:12.643Z",
+    "updatedAt": "2025-03-26T12:03:12.643Z"
+  }
 ]

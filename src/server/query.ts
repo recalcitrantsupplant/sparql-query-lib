@@ -1,14 +1,17 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { executeQuery } from './http';
-import { randomUUID } from 'crypto';
-import { StoredQuery, VariableRestrictions } from '../types';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+// randomUUID is now handled within QueryManager
+import { StoredQuery, VariableRestrictions, VariableGroup } from '../types'; // Keep types
+// fs and path are now handled within FileSystemQueryStorage
 import { backendState } from './backend';
-import { SparqlQueryParser } from '../lib/parser';
+// SparqlQueryParser is now handled within QueryManager/FileSystemQueryStorage
 import { config } from './config';
 import { performance } from 'perf_hooks';
+import { FileSystemQueryStorage } from './queryStorage'; // Import storage
+import { QueryManager } from './queryManager'; // Import manager
 
+// Remove old file-based functions and global variable
+/*
 const QUERIES_PATH = path.join(__dirname, 'queries.json');
 
 async function readQueries(): Promise<StoredQuery[]> {
@@ -63,19 +66,21 @@ async function writeQueries(queries: StoredQuery[]): Promise<void> {
 }
 
 function generateId(): string {
-  return randomUUID().substring(0, 8); // Generate a short random ID
 }
+*/
 
-let queries: StoredQuery[] = [];
+// No longer need global queries array:
+// let queries: StoredQuery[] = [];
 
 export async function registerQueryRoutes(app: FastifyInstance) {
-  try {
-    queries = await readQueries();
-  } catch (error: any) {
-    console.error('Error initializing queries:', error);
-    // Consider a more robust error handling strategy, such as exiting the process
-    // or providing a default set of queries.  For now, we'll leave queries as []
-  }
+
+  // Instantiate storage and manager
+  const storage = new FileSystemQueryStorage();
+  const queryManager = new QueryManager(storage);
+
+  // Initialize the manager (loads queries into memory)
+  await queryManager.initialize();
+  // Removed old try/catch block for readQueries
 
   // List all queries
   app.get<{ Querystring: { page?: number; limit?: number; sort?: string; order?: string } }>('/queries', {
@@ -94,14 +99,17 @@ export async function registerQueryRoutes(app: FastifyInstance) {
       }
     }
   }, async (request: FastifyRequest<{ Querystring: { page?: number; limit?: number; sort?: string; order?: string } }>, reply: FastifyReply) => {
-    const { page, limit, sort, order } = request.query;
+    const { page = 1, limit = 10, sort, order } = request.query; // Default page/limit
+    const allQueries = queryManager.getAllQueries(); // Use manager
 
+    // Basic pagination/sorting can be added here if needed, operating on allQueries
+    // For now, just return all data
     return {
-      data: queries,
+      data: allQueries,
       metadata: {
-        total: queries.length,
-        page: page || 1,
-        limit: limit || 10
+        total: allQueries.length,
+        page: page,
+        limit: limit
       }
     };
   });
@@ -122,22 +130,16 @@ export async function registerQueryRoutes(app: FastifyInstance) {
       }
     }
   }, async (request: FastifyRequest<{ Body: { name: string; description?: string; query: string } }>, reply: FastifyReply) => {
-    const { name, description, query } = request.body;
-    const id = generateId();
-    const now = new Date();
-
-    const newQuery: StoredQuery = {
-      id,
-      name,
-      description,
-      query,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    queries.push(newQuery);
-    await writeQueries(queries);
-    reply.status(201).send(newQuery);
+    try {
+      // Delegate creation entirely to the manager
+      const newQuery = await queryManager.createQuery(request.body);
+      reply.status(201).send(newQuery);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to create query.';
+        console.error('Error processing create query request:', error);
+        // Return specific error from manager if available
+        reply.status(500).send({ error: errorMessage });
+    }
   });
 
   // Get a specific query
@@ -155,19 +157,19 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const query = queries.find(q => q.id === queryId);
+    const query = queryManager.getQueryById(queryId); // Use manager
 
     if (query) {
-      return reply.status(200).send(query);
+      reply.status(200).send(query);
+    } else {
+      console.log(`[DEBUG] Query not found for id: ${queryId}`);
+      reply.status(404).send({ error: 'Query not found' });
     }
-
-    console.log(`[DEBUG] Query not found for id: ${queryId}`);
-    return reply.status(404).send({ error: 'Query not found' });
   });
 
-  // Update a query (full update)
-  app.put<{ Params: { queryId: string }, Body: { name: string; description?: string; query: string } }>('/queries/:queryId', {
-    schema: {
+    // Update a query (full update)
+    app.put<{ Params: { queryId: string }, Body: { name: string; description?: string; query: string } }>('/queries/:queryId', {
+        schema: { // Keep schema
       tags: ['Query'],
       operationId: 'updateQuery',
       params: {
@@ -185,34 +187,30 @@ export async function registerQueryRoutes(app: FastifyInstance) {
           query: { type: 'string' }
         },
         required: ['name', 'query']
-      }
-    }
+      } // End schema properties
+    } // End schema
   }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { name: string; description?: string; query: string } }>, reply: FastifyReply) => {
-    const { queryId } = request.params;
-    const { name, description, query } = request.body;
+        const { queryId } = request.params;
 
-    const existingQueryIndex = queries.findIndex(q => q.id === queryId);
-    if (existingQueryIndex === -1) {
-      return reply.status(404).send({ error: 'Query not found' });
-    }
+        try {
+            // Delegate update entirely to the manager
+            const updatedQuery = await queryManager.updateQuery(queryId, request.body);
 
-    const updatedQuery: StoredQuery = {
-      id: queryId,
-      name,
-      description,
-      query,
-      createdAt: queries[existingQueryIndex].createdAt,
-      updatedAt: new Date()
-    };
+            if (updatedQuery) {
+                reply.status(200).send(updatedQuery);
+            } else {
+                reply.status(404).send({ error: 'Query not found' });
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to update query.';
+            console.error('Error processing update query request:', error);
+            reply.status(500).send({ error: errorMessage });
+        }
+    });
 
-    queries[existingQueryIndex] = updatedQuery;
-    await writeQueries(queries);
-    reply.status(200).send(updatedQuery);
-  });
-
-  // Delete a query
-  app.delete<{ Params: { queryId: string } }>('/queries/:queryId', {
-    schema: {
+    // Delete a query
+    app.delete<{ Params: { queryId: string } }>('/queries/:queryId', {
+        schema: {
       tags: ['Query'],
       operationId: 'deleteQuery',
       params: {
@@ -224,17 +222,23 @@ export async function registerQueryRoutes(app: FastifyInstance) {
       }
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
-    const { queryId } = request.params;
+        const { queryId } = request.params;
 
-    const existingQueryIndex = queries.findIndex(q => q.id === queryId);
-    if (existingQueryIndex === -1) {
-      return reply.status(404).send({ error: 'Query not found' });
-    }
+        try {
+            // Delegate deletion entirely to the manager
+            const deleted = await queryManager.deleteQuery(queryId);
 
-    queries.splice(existingQueryIndex, 1);
-    await writeQueries(queries);
-    reply.status(204).send();
-  });
+            if (deleted) {
+                reply.status(204).send();
+            } else {
+                reply.status(404).send({ error: 'Query not found' });
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to delete query.';
+            console.error('Error processing delete query request:', error);
+            reply.status(500).send({ error: errorMessage });
+        }
+    });
 
   // List variables in a query
   app.get<{ Params: { queryId: string } }>('/queries/:queryId/variables', {
@@ -251,13 +255,14 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const query = queries.find(q => q.id === queryId);
+    const query = queryManager.getQueryById(queryId); // Use manager
 
     if (!query) {
-      return reply.status(404).send({ error: 'Query not found' });
+      reply.status(404).send({ error: 'Query not found' });
+      return; // Added return
     }
 
-    return query.variables || [];
+    reply.send(query.variables || []); // Send variables or empty array
   });
 
   // Execute a query with variables
@@ -293,10 +298,11 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
    }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { [variable: string]: any } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const query = queries.find(q => q.id === queryId);
+    const query = queryManager.getQueryById(queryId); // Use manager
 
     if (!query) {
-      return reply.status(404).send({ error: 'Query not found' });
+      reply.status(404).send({ error: 'Query not found' });
+      return; // Added return
     }
 
     const variables = request.body;

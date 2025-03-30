@@ -137,7 +137,7 @@ export async function registerBackendRoutes(app: FastifyInstance) {
   });
 
   // Set Current Backend
-  app.post<{ Body: { id: string } }>(`/backends/current`, {
+  app.put<{ Body: { id: string } }>(`/backends/current`, {
     schema: {
       tags: ['Backend'],
       operationId: 'setCurrentBackend',
