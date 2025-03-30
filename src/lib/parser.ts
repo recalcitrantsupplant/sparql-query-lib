@@ -1,6 +1,6 @@
 import { Parser, Generator as SparqlGenerator } from 'sparqljs';
 
-type ParsedQuery = any;
+type ParsedQuery = any; // Consider defining a more specific type if possible
 
 export class SparqlQueryParser {
   private parser: any;
@@ -96,11 +96,13 @@ export class SparqlQueryParser {
             processPatterns([unionPattern]);
           });
         }
-        
         // Check for filter patterns with EXISTS or NOT EXISTS
         if (pattern.filter && (pattern.filter.exists || pattern.filter.notexists)) {
-          const subPattern = pattern.filter.exists || pattern.filter.notexists;
-          processPatterns(pattern.patterns);
+          // const subPattern = pattern.filter.exists || pattern.filter.notexists; // Original code had unused variable
+          // Assuming we need to process patterns within EXISTS/NOT EXISTS
+          if (pattern.filter.patterns) {
+             processPatterns(pattern.filter.patterns);
+          }
         }
       }
     };
@@ -114,6 +116,39 @@ export class SparqlQueryParser {
   }
 
   /**
+   * Detect output variables or aliased expressions in a SELECT query.
+   * Returns the names as they would appear in the SPARQL JSON results header.
+   * @param queryString The SPARQL query string to analyze
+   * @returns Array of output variable/alias names. Returns an empty array for non-SELECT queries or SELECT *.
+   */
+  detectQueryOutputs(queryString: string): string[] {
+    const parsedQuery = this.parseQuery(queryString);
+
+    if (parsedQuery.queryType !== 'SELECT' || !parsedQuery.variables) {
+      return []; // Not a SELECT query or invalid structure
+    }
+
+    const outputs: string[] = [];
+    for (const item of parsedQuery.variables) {
+      if (typeof item === 'string' && item === '*') {
+        // For SELECT *, the specific variables depend on the WHERE clause.
+        // Returning an empty array as the explicit list is unknown from SELECT clause alone.
+        return []; 
+      } else if (item.termType === 'Variable') {
+        // Simple variable like ?var
+        outputs.push(item.value);
+      } else if (item.variable && item.variable.termType === 'Variable') {
+        // Expression with alias like (COUNT(?s) AS ?count)
+        outputs.push(item.variable.value);
+      }
+      // Ignore items without a clear output variable name (e.g., expressions without AS)
+    }
+
+    return outputs;
+  }
+
+
+  /**
    * Apply bindings to a SPARQL query by replacing UNDEF values
    * @param queryString The original SPARQL query string
    * @param bindings The bindings to apply
@@ -124,15 +159,26 @@ export class SparqlQueryParser {
     
     // Helper function to apply bindings to VALUES patterns
     const applyBindingsToValuesPattern = (pattern: any): void => {
+      // Initial check for VALUES pattern type
       if (pattern.type !== 'values' || !pattern.values || pattern.values.length === 0) {
         return;
       }
-      
-      if (!this.hasRowWithAllUndef(pattern) || !bindings.arguments || !bindings.arguments.bindings) {
-        return;
+
+      // Check if there's a row with UNDEF to replace
+      if (!this.hasRowWithAllUndef(pattern)) {
+        return; // Nothing to bind if no UNDEF row exists
       }
-      
-      // Find a non-empty row to extract variable names
+
+      // Check bindings structure validity (supports SPARQL JSON results or original assumed format)
+      const isSparqlJsonFormat = bindings && bindings.head && bindings.head.vars && bindings.results && bindings.results.bindings;
+      const isOriginalFormat = bindings && bindings.arguments && bindings.arguments.bindings;
+
+      if (!isSparqlJsonFormat && !isOriginalFormat) {
+          console.warn("Bindings structure mismatch or missing bindings array.");
+          return; // Invalid bindings structure
+      }
+
+      // Find a non-empty row to extract variable names (safe to do after checks)
       const nonEmptyRow = pattern.values.find((row: any) => Object.keys(row).length > 0);
       if (!nonEmptyRow) {
         return;
@@ -142,18 +188,35 @@ export class SparqlQueryParser {
       const varNames = Object.keys(nonEmptyRow).map((v: string) => 
         v.startsWith('?') ? v.substring(1) : v
       );
-      
-      // Check if all variables in this pattern have bindings
+
+      // Determine the source of bindings based on structure
+      let bindingSource: any[] = [];
+      let bindingVars: string[] = [];
+
+      if (bindings.results && bindings.results.bindings) { // SPARQL JSON Result format
+        bindingSource = bindings.results.bindings;
+        bindingVars = bindings.head.vars;
+      } else if (bindings.arguments && bindings.arguments.bindings) { // Original assumed format
+         bindingSource = bindings.arguments.bindings;
+         // Use head.vars if available, otherwise infer from first binding
+         bindingVars = bindings.head?.vars ?? (bindingSource.length > 0 ? Object.keys(bindingSource[0]) : []);
+      } else {
+         console.warn("Unsupported bindings format.");
+         return;
+      }
+
+      // Check if all variables in this pattern have bindings available in the source
       const hasAllVars = varNames.every((varName: string) => 
-        bindings.head.vars.includes(varName)
+        bindingVars.includes(varName)
       );
       
       if (!hasAllVars) {
+         console.warn("Not all pattern variables found in bindings header.");
         return;
       }
       
       // Only proceed if we have bindings to apply
-      if (bindings.arguments.bindings.length === 0) {
+      if (bindingSource.length === 0) {
         return;
       }
       
@@ -164,12 +227,12 @@ export class SparqlQueryParser {
       });
       
       // Create new rows for the provided bindings
-      const newRows = bindings.arguments.bindings.map((binding: any) => {
+      const newRows = bindingSource.map((binding: any) => {
         const newRow: any = {};
         
         varNames.forEach((varName: string) => {
           const varKey = varName.startsWith('?') ? varName : `?${varName}`;
-          const bindingValue = binding[varName];
+          const bindingValue = binding[varName]; // Access binding using the variable name
           
           if (!bindingValue) {
             newRow[varKey] = undefined; // UNDEF
@@ -190,11 +253,14 @@ export class SparqlQueryParser {
                   datatype: bindingValue.datatype ? {
                     termType: 'NamedNode',
                     value: bindingValue.datatype
-                  } : undefined
-                };
-                break;
+                  } : undefined // Handle missing datatype
+                 };
+                 break;
+              case 'bnode': // bnode (Blank Nodes) are illegal in VALUES blocks per SPARQL spec.
+                 throw new Error(`Illegal binding type in VALUES: 'bnode' for variable ${varName}`);
               default:
-                newRow[varKey] = undefined; // UNDEF
+                 console.warn(`Unsupported binding type in VALUES: ${bindingValue.type} for variable ${varName}`);
+                newRow[varKey] = undefined; // UNDEF for other unsupported types
             }
           }
         });
@@ -221,22 +287,54 @@ export class SparqlQueryParser {
           processPatterns(pattern.patterns);
         }
         
-        // Check for optional patterns
-        if (pattern.optional) {
-          processPatterns([pattern.optional]);
+        // Check for graph patterns
+        if (pattern.type === 'graph' && pattern.patterns) {
+           processPatterns(pattern.patterns);
+        }
+
+        // Check for service patterns
+        if (pattern.type === 'service' && pattern.patterns) {
+           processPatterns(pattern.patterns);
         }
         
-        // Check for union patterns
-        if (pattern.union) {
-          pattern.union.forEach((unionPattern: any) => {
-            processPatterns([unionPattern]);
+        // Check for group patterns (common wrapper)
+        if (pattern.type === 'group' && pattern.patterns) {
+           processPatterns(pattern.patterns);
+        }
+
+        // Check for optional patterns - process patterns inside optional
+        if (pattern.type === 'optional' && pattern.patterns) {
+          processPatterns(pattern.patterns);
+        }
+        
+        // Check for union patterns - process patterns inside each part of the union
+        if (pattern.type === 'union') {
+          // sparqljs uses pattern.patterns for union members, each member is typically a group
+          pattern.patterns.forEach((unionMember: any) => {
+            // Process the patterns *within* the union member (e.g., the group)
+            if (unionMember && unionMember.patterns) {
+              processPatterns(unionMember.patterns);
+            } else {
+              // Handle cases where a union member might not be a standard group or might be empty
+              // Depending on expected SPARQL structures, might need more robust handling
+              console.warn("Unexpected structure within UNION pattern:", unionMember);
+            }
           });
         }
         
+        // Check for minus patterns
+        if (pattern.type === 'minus' && pattern.patterns) {
+           processPatterns(pattern.patterns);
+        }
+
         // Check for filter patterns with EXISTS or NOT EXISTS
-        if (pattern.filter && (pattern.filter.exists || pattern.filter.notexists)) {
-          const subPattern = pattern.filter.exists || pattern.filter.notexists;
-          processPatterns(pattern.patterns);
+        if (pattern.type === 'filter' && pattern.expression && (pattern.expression.type === 'operation')) {
+           if (pattern.expression.operator === 'exists' || pattern.expression.operator === 'notexists') {
+              // Process patterns within EXISTS/NOT EXISTS
+              if(pattern.expression.args && pattern.expression.args[0] && pattern.expression.args[0].patterns) {
+                 processPatterns(pattern.expression.args[0].patterns);
+              }
+           }
         }
       }
     };

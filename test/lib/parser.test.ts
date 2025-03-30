@@ -555,5 +555,234 @@ describe('SparqlQueryParser', () => {
       expect(valuesPattern.values[0]['?subject']).toBeUndefined();
       expect(valuesPattern.values[0]['?predicate']).toBeUndefined();
     });
+
+    it('should not modify the query if no VALUES clause exists', () => {
+      const queryString = 'SELECT * WHERE { ?s ?p ?o }';
+      const bindings: QueryBindings = {
+        head: { vars: ['s'] },
+        arguments: { bindings: [{ s: { type: 'uri', value: 'http://example.org/s1' } }] }
+      };
+      const result = parser.applyBindings(queryString, bindings);
+      // Compare parsed structures as generator might add punctuation
+      const originalParsed = parser.parseQuery(queryString);
+      const resultParsed = parser.parseQuery(result);
+      expect(resultParsed).toEqual(originalParsed);
+    });
+
+    it('should not modify the query if VALUES clause is empty', () => {
+      const queryString = 'SELECT * WHERE { VALUES ?a {} ?s ?p ?o }';
+       const bindings: QueryBindings = {
+        head: { vars: ['a'] },
+        arguments: { bindings: [{ a: { type: 'uri', value: 'http://example.org/a1' } }] }
+      };
+      const result = parser.applyBindings(queryString, bindings);
+      // Generator might slightly reformat, so parse and compare relevant parts
+      const originalParsed = parser.parseQuery(queryString);
+      const resultParsed = parser.parseQuery(result);
+      expect(resultParsed.where.find((p: any) => p.type === 'values')).toEqual(
+        originalParsed.where.find((p: any) => p.type === 'values')
+      );
+    });
+
+     it('should handle VALUES clause with only UNDEF row correctly', () => {
+      // Covers line 164 where nonEmptyRow might be null/undefined initially
+      const queryString = 'SELECT * WHERE { VALUES (?a) { (UNDEF) } }'; // Corrected syntax
+      const bindings: QueryBindings = {
+        head: { vars: ['a'] },
+        arguments: { bindings: [{ a: { type: 'uri', value: 'http://example.org/a1' } }] }
+      };
+      const result = parser.applyBindings(queryString, bindings);
+      expect(result).toContain('http://example.org/a1');
+      expect(result).not.toContain('UNDEF');
+      const parsedResult = parser.parseQuery(result);
+      const valuesPattern = parsedResult.where.find((p: any) => p.type === 'values');
+      expect(valuesPattern.values).toHaveLength(1);
+    });
+
+    it('should return original query and warn for invalid bindings structure', () => {
+      const queryString = 'SELECT * WHERE { VALUES (?a) { (UNDEF) } }'; // Corrected syntax
+      const invalidBindings = { results: { bindings: [] } }; // Missing head
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+      // Since the function returns early on invalid bindings, parse and compare
+      const result = parser.applyBindings(queryString, invalidBindings as any);
+      const originalParsed = parser.parseQuery(queryString);
+      const resultParsed = parser.parseQuery(result);
+
+      expect(resultParsed).toEqual(originalParsed); // Compare parsed structure
+      expect(warnSpy).toHaveBeenCalledWith("Bindings structure mismatch or missing bindings array.");
+      warnSpy.mockRestore();
+    });
+
+    it('should return original query part and warn if bindings header misses variables', () => {
+      const queryString = 'SELECT * WHERE { VALUES (?a ?b) { (UNDEF UNDEF) } }';
+      const bindings: QueryBindings = {
+        head: { vars: ['a'] }, // Missing 'b'
+        arguments: { bindings: [{ a: { type: 'uri', value: 'http://example.org/a1' } }] }
+      };
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+      const result = parser.applyBindings(queryString, bindings);
+      const parsedResult = parser.parseQuery(result);
+      const valuesPattern = parsedResult.where.find((p: any) => p.type === 'values');
+
+      // The VALUES clause should remain unmodified with UNDEF
+      expect(valuesPattern.values).toHaveLength(1);
+      expect(valuesPattern.values[0]['?a']).toBeUndefined();
+      expect(valuesPattern.values[0]['?b']).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith("Not all pattern variables found in bindings header.");
+      warnSpy.mockRestore();
+    });
+
+     it('should handle missing variable values in bindings as UNDEF', () => {
+      const queryString = 'SELECT * WHERE { VALUES (?a ?b) { (UNDEF UNDEF) } }';
+      const bindings: QueryBindings = {
+        head: { vars: ['a', 'b'] },
+        arguments: {
+          bindings: [
+            { a: { type: 'uri', value: 'http://example.org/a1' } }, // Missing 'b' here
+            { a: { type: 'uri', value: 'http://example.org/a2' }, b: { type: 'uri', value: 'http://example.org/b2' } }
+          ]
+        }
+      };
+      const result = parser.applyBindings(queryString, bindings);
+      const parsedResult = parser.parseQuery(result);
+      const valuesPattern = parsedResult.where.find((p: any) => p.type === 'values');
+
+      expect(valuesPattern.values).toHaveLength(2);
+      // First row should have ?a bound, ?b UNDEF
+      expect(valuesPattern.values[0]['?a'].value).toBe('http://example.org/a1');
+      expect(valuesPattern.values[0]['?b']).toBeUndefined();
+      // Second row should have both bound
+      expect(valuesPattern.values[1]['?a'].value).toBe('http://example.org/a2');
+      expect(valuesPattern.values[1]['?b'].value).toBe('http://example.org/b2');
+    });
+
+    it('should handle literal bindings without datatype', () => {
+      const queryString = 'SELECT * WHERE { VALUES (?lit) { (UNDEF) } }'; // Corrected syntax
+      const bindings: QueryBindings = {
+        head: { vars: ['lit'] },
+        arguments: { bindings: [{ lit: { type: 'literal', value: 'Simple Literal' } }] } // No datatype
+      };
+      const result = parser.applyBindings(queryString, bindings);
+      expect(result).toContain('"Simple Literal"'); // Should be quoted
+      expect(result).not.toContain('^^'); // No explicit datatype annotation expected in simple cases
+      const parsedResult = parser.parseQuery(result);
+      const valuesPattern = parsedResult.where.find((p: any) => p.type === 'values');
+      // Expect sparqljs to default to xsd:string if no datatype/lang is present
+      expect(valuesPattern.values[0]['?lit'].datatype).toEqual({
+        termType: 'NamedNode',
+        value: 'http://www.w3.org/2001/XMLSchema#string'
+      });
+    });
+
+    // Removed test for blank nodes as they are illegal in VALUES blocks
+
+    it('should handle unsupported binding types as UNDEF and warn', () => {
+      const queryString = 'SELECT * WHERE { VALUES (?unknown) { (UNDEF) } }'; // Corrected syntax
+      const bindings: QueryBindings = {
+        head: { vars: ['unknown'] },
+        arguments: { bindings: [{ unknown: { type: 'weird', value: 'data' } as any }] } // Cast to any to bypass type check
+      };
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+      const result = parser.applyBindings(queryString, bindings);
+      const parsedResult = parser.parseQuery(result);
+      const valuesPattern = parsedResult.where.find((p: any) => p.type === 'values');
+
+      // Should result in UNDEF in the VALUES clause
+      expect(valuesPattern.values).toHaveLength(1);
+      expect(valuesPattern.values[0]['?unknown']).toBeUndefined();
+      // Expect the updated warning message
+      expect(warnSpy).toHaveBeenCalledWith("Unsupported binding type in VALUES: weird for variable unknown");
+      warnSpy.mockRestore();
+    });
+
+    it('should throw an error for illegal bnode bindings in VALUES', () => {
+      const queryString = 'SELECT * WHERE { VALUES (?bnode) { (UNDEF) } }';
+      const bindings: QueryBindings = {
+        head: { vars: ['bnode'] },
+        arguments: { bindings: [{ bnode: { type: 'bnode', value: 'b1' } }] }
+      };
+
+      // Expect the applyBindings function to throw an error
+      expect(() => parser.applyBindings(queryString, bindings)).toThrow(
+        "Illegal binding type in VALUES: 'bnode' for variable bnode"
+      );
+    });
+
+  });
+
+  describe('detectQueryOutputs', () => {
+    it('should detect simple variables in a SELECT query', () => {
+      const queryString = 'SELECT ?subject ?predicate ?object WHERE { ?subject ?predicate ?object }';
+      const result = parser.detectQueryOutputs(queryString);
+      expect(result).toEqual(['subject', 'predicate', 'object']);
+    });
+
+    it('should return an empty array for SELECT *', () => {
+      const queryString = 'SELECT * WHERE { ?s ?p ?o }';
+      const result = parser.detectQueryOutputs(queryString);
+      expect(result).toEqual([]);
+    });
+
+    it('should detect aliased expressions in a SELECT query with GROUP BY', () => {
+      // Added GROUP BY ?p to make the query valid
+      const queryString = 'SELECT (COUNT(?s) AS ?count) (?p AS ?pred) WHERE { ?s ?p ?o } GROUP BY ?p';
+      const result = parser.detectQueryOutputs(queryString);
+      expect(result).toEqual(['count', 'pred']);
+    });
+
+    it('should detect a mix of simple variables and aliases with GROUP BY', () => {
+      // Added GROUP BY ?subject ?predicate to make the query valid
+      const queryString = 'SELECT ?subject (COUNT(?o) AS ?objectCount) ?predicate WHERE { ?subject ?predicate ?object } GROUP BY ?subject ?predicate';
+      const result = parser.detectQueryOutputs(queryString);
+      expect(result).toEqual(['subject', 'objectCount', 'predicate']);
+    });
+
+    // Removed the test for 'should ignore expressions without aliases' because
+    // 'SELECT ?subject (COUNT(?o)) ...' is invalid SPARQL syntax and causes a parse error.
+    // The detectQueryOutputs function relies on a successful parse.
+
+    it('should return an empty array for non-SELECT queries (CONSTRUCT)', () => {
+      const queryString = 'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }';
+      const result = parser.detectQueryOutputs(queryString);
+      expect(result).toEqual([]);
+    });
+
+    it('should return an empty array for non-SELECT queries (ASK)', () => {
+      const queryString = 'ASK WHERE { ?s ?p ?o }';
+      const result = parser.detectQueryOutputs(queryString);
+      expect(result).toEqual([]);
+    });
+
+    it('should return an empty array for non-SELECT queries (DESCRIBE)', () => {
+      const queryString = 'DESCRIBE ?s WHERE { ?s ?p ?o }';
+      const result = parser.detectQueryOutputs(queryString);
+      expect(result).toEqual([]);
+    });
+
+    it('should detect outputs from the outer query only in a subselect', () => {
+      const queryString = `
+        SELECT ?outerVar (SUM(?innerCount) AS ?totalCount)
+        WHERE {
+          ?outerVar <http://example.org/prop> ?intermediate .
+          {
+            SELECT ?intermediate (COUNT(?inner) AS ?innerCount)
+            WHERE {
+              ?intermediate <http://example.org/innerProp> ?inner .
+            }
+            GROUP BY ?intermediate
+          }
+        }
+        GROUP BY ?outerVar
+      `;
+      const result = parser.detectQueryOutputs(queryString);
+      // Should only detect ?outerVar and ?totalCount from the outer SELECT
+      expect(result).toEqual(['outerVar', 'totalCount']);
+    });
+
+    // Note: UPDATE queries might throw parse errors depending on sparql.js version
+    // or might be parsed differently. Testing basic non-SELECT types is sufficient.
   });
 });

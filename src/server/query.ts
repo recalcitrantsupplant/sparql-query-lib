@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { executeQuery } from './http';
+import { executeQuery } from './sparqlClient'; // Updated import path
 import { StoredQuery, VariableGroup, Library, Backend } from '../types'; // Import Backend type
 // Removed backendState import
 import { config } from './config';

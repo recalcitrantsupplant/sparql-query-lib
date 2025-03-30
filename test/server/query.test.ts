@@ -2,11 +2,17 @@ import Fastify, { FastifyInstance } from 'fastify';
 import * as fs from 'fs';
 import * as path from 'path';
 import { registerQueryRoutes } from '../../src/server/query';
-// Removed: import { QueryManager } from '../../src/server/queryManager';
 import { LibraryManager } from '../../src/server/libraryManager';
-// Updated imports for storage
 import { FileSystemLibraryStorage, ILibraryStorage } from '../../src/server/libraryStorage';
-import { StoredQuery, VariableGroup, Library } from '../../src/types'; // Import necessary types
+import { FileSystemBackendStorage, IBackendStorage } from '../../src/server/backendStorage'; // Import Backend Storage
+import { StoredQuery, VariableGroup, Library, Backend } from '../../src/types'; // Import necessary types
+import { executeQuery } from '../../src/server/sparqlClient'; // Import to mock
+
+// --- Mock external dependencies ---
+jest.mock('../../src/server/sparqlClient', () => ({
+  executeQuery: jest.fn(),
+}));
+// ---------------------------------
 
 // Define interfaces used in tests
 interface QuerySummary {
@@ -27,12 +33,12 @@ interface ListQueriesResponse {
 }
 
 // Paths for temporary test storage files
-const TEST_QUERY_STORAGE_PATH = path.join(__dirname, 'test-queries-inject.json');
 const TEST_LIB_STORAGE_PATH = path.join(__dirname, 'test-libraries-for-queries.json'); // Separate lib storage for query tests
+const TEST_BACKEND_STORAGE_PATH = path.join(__dirname, 'test-backends-for-queries.json'); // Backend storage for query tests
 
 // Paths for empty state files
-const EMPTY_QUERIES_PATH = path.join(__dirname, 'empty-queries.json'); // Created earlier
 const EMPTY_LIBS_PATH = path.join(__dirname, 'empty-libraries.json'); // From library tests
+const EMPTY_BACKENDS_PATH = path.join(__dirname, 'empty-backends.json'); // From backend tests
 
 // --- Test Setup: Need a default library for most query operations ---
 const DEFAULT_TEST_LIBRARY_NAME = 'query-test-lib';
@@ -40,24 +46,27 @@ let defaultTestLibraryId: string;
 // --------------------------------------------------------------------
 
 // Helper function to build the Fastify app for testing
-// Removed QueryManager from return type
-async function buildTestApp(): Promise<{ app: FastifyInstance, libraryManager: LibraryManager, defaultLibraryId: string }> {
+async function buildTestApp(): Promise<{
+  app: FastifyInstance,
+  libraryManager: LibraryManager,
+  backendStorage: IBackendStorage, // Add backend storage
+  defaultLibraryId: string
+}> {
   const app = Fastify({ logger: false });
 
   // Use temporary copies for test isolation
-  // Note: We only need one storage file now as FileSystemLibraryStorage handles both
   fs.copyFileSync(EMPTY_LIBS_PATH, TEST_LIB_STORAGE_PATH);
+  fs.copyFileSync(EMPTY_BACKENDS_PATH, TEST_BACKEND_STORAGE_PATH); // Copy empty backends
 
   // --- Create test-specific storage instances ---
-  // Use the new interface and implementation
   const libraryStorage: ILibraryStorage = new FileSystemLibraryStorage(TEST_LIB_STORAGE_PATH);
+  const backendStorage: IBackendStorage = new FileSystemBackendStorage(TEST_BACKEND_STORAGE_PATH); // Create backend storage
   // ---------------------------------------------
 
   // Instantiate Managers with test storage
   const libraryManager = new LibraryManager(libraryStorage);
   await libraryManager.initialize(); // Initialize manager (verifies storage)
-
-  // Removed: QueryManager instantiation
+  // No QueryManager needed
 
   // --- Create a default library for tests ---
   // This needs to happen *after* manager initialization
@@ -80,8 +89,8 @@ async function buildTestApp(): Promise<{ app: FastifyInstance, libraryManager: L
   // -----------------------------------------
 
   // Decorate the app instance
-  app.decorate('libraryManager', libraryManager); // Keep decoration if routes use it
-  // Removed: app.decorate('queryManager', queryManager);
+  app.decorate('libraryManager', libraryManager);
+  app.decorate('backendStorage', backendStorage); // Decorate with backend storage
 
   // Register only the query routes
   await app.register(registerQueryRoutes);
@@ -89,22 +98,27 @@ async function buildTestApp(): Promise<{ app: FastifyInstance, libraryManager: L
   await app.ready(); // Ensure all plugins are loaded
 
   // Return the app instance and other relevant objects
-  // Removed queryManager from return object
-  return { app, libraryManager, defaultLibraryId };
+  return { app, libraryManager, backendStorage, defaultLibraryId };
 }
 
 
 describe('Query Routes Tests (Inject)', () => {
   let app: FastifyInstance;
-  let libraryManager: LibraryManager; // To access manager directly if needed
-  // defaultTestLibraryId is now created within buildTestApp
+  let libraryManager: LibraryManager;
+  let backendStorage: IBackendStorage; // Add backend storage instance
+  const mockExecuteQuery = executeQuery as jest.Mock; // Type cast for mocked function
 
   beforeEach(async () => {
-    // Build a fresh app instance and get managers/default ID for each test
+    // Build a fresh app instance and get managers/storage/default ID for each test
     const buildResult = await buildTestApp();
     app = buildResult.app;
-    libraryManager = buildResult.libraryManager; // Get manager instance
-    defaultTestLibraryId = buildResult.defaultLibraryId; // Get the ID created in setup
+    libraryManager = buildResult.libraryManager;
+    backendStorage = buildResult.backendStorage; // Get backend storage instance
+    defaultTestLibraryId = buildResult.defaultLibraryId;
+
+    // Reset mocks before each test
+    mockExecuteQuery.mockClear();
+    // Reset any libraryManager mocks if needed (using jest.spyOn later)
   });
 
   afterEach(async () => {
@@ -112,11 +126,10 @@ describe('Query Routes Tests (Inject)', () => {
     await app.close();
     // Clean up the temporary storage files
     try {
-      // Only need to clean up the single library storage file now
-      // fs.unlinkSync(TEST_QUERY_STORAGE_PATH); // Removed
       fs.unlinkSync(TEST_LIB_STORAGE_PATH);
+      fs.unlinkSync(TEST_BACKEND_STORAGE_PATH); // Clean up backend storage file
     } catch (err) {
-      // Ignore errors
+      // Ignore errors, file might not exist if setup failed
     }
   });
 
@@ -440,5 +453,182 @@ describe('Query Routes Tests (Inject)', () => {
     // expect(executeData).toHaveProperty('results'); // Or error property
   });
   */
+
+  // --- Execute Route Tests ---
+
+  describe('/queries/:queryId/execute', () => {
+    let testQuery: StoredQuery;
+    let testBackend: Backend;
+
+    beforeEach(async () => {
+      // Create a query and a backend for execution tests
+      testQuery = await libraryManager.addQueryToLibrary(defaultTestLibraryId, {
+        name: 'execTestQuery',
+        query: 'SELECT * WHERE { ?s ?p ?o }',
+      });
+      testBackend = await backendStorage.addBackend({
+        name: 'execTestBackend',
+        endpoint: 'http://fake-endpoint.com/sparql',
+      });
+    });
+
+    it('should execute a query successfully', async () => {
+      const mockResultBody = { results: { bindings: [{ s: { type: 'uri', value: 'http://example.com/s' } }] } };
+      // Mock executeQuery to return a structure similar to undici response
+      mockExecuteQuery.mockResolvedValue({
+        statusCode: 200,
+        headers: { 'content-type': 'application/sparql-results+json' },
+         body: { json: jest.fn().mockResolvedValue(mockResultBody) }
+       });
+
+      const bindingsPayload: any[] = []; // Send an empty array to match schema
+
+       const response = await app.inject({
+         method: 'POST',
+        url: `/queries/${testQuery.id}/execute`,
+        payload: {
+          backendId: testBackend.id,
+          bindings: bindingsPayload,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toEqual(mockResultBody);
+      expect(mockExecuteQuery).toHaveBeenCalledWith(
+        backendStorage, // Check if the correct storage instance is passed
+        testQuery.query,
+        testBackend.id,
+        bindingsPayload
+      );
+    });
+
+    it('should return 404 if query is not found', async () => {
+      const response = await app.inject({
+        method: 'POST',
+         url: '/queries/non-existent-query/execute',
+         payload: { backendId: testBackend.id, bindings: [] }, // Use empty array
+       });
+       expect(response.statusCode).toBe(404);
+      expect(JSON.parse(response.body).error).toContain('Query with ID non-existent-query not found');
+      expect(mockExecuteQuery).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 if backend is not found', async () => {
+      const response = await app.inject({
+        method: 'POST',
+         url: `/queries/${testQuery.id}/execute`,
+         payload: { backendId: 'non-existent-backend', bindings: [] }, // Use empty array
+       });
+       expect(response.statusCode).toBe(404);
+      expect(JSON.parse(response.body).error).toContain('Backend with ID non-existent-backend not found');
+      expect(mockExecuteQuery).not.toHaveBeenCalled();
+    });
+
+    it('should return 500 if executeQuery throws an error', async () => {
+      const executionError = new Error('SPARQL endpoint error');
+      mockExecuteQuery.mockRejectedValue(executionError);
+
+       const response = await app.inject({
+         method: 'POST',
+         url: `/queries/${testQuery.id}/execute`,
+         payload: { backendId: testBackend.id, bindings: [] }, // Use empty array
+       });
+
+       expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toContain(`Failed to execute query on backend ${testBackend.id}`);
+      expect(mockExecuteQuery).toHaveBeenCalled();
+    });
+
+     it('should return 500 if fetching query or backend fails initially', async () => {
+      // Mock libraryManager to throw error when getting query
+      jest.spyOn(libraryManager, 'getQueryById').mockRejectedValueOnce(new Error('DB connection error'));
+
+       const response = await app.inject({
+         method: 'POST',
+         url: `/queries/${testQuery.id}/execute`,
+         payload: { backendId: testBackend.id, bindings: [] }, // Use empty array
+       });
+
+       expect(response.statusCode).toBe(500);
+      // Expect the actual error message thrown by the mock, as the handler passes it through
+      expect(JSON.parse(response.body).error).toBe('DB connection error');
+      expect(mockExecuteQuery).not.toHaveBeenCalled();
+
+      // Restore spy
+      jest.restoreAllMocks();
+    });
+  });
+
+  // --- General Error Handling Tests ---
+
+  describe('General Error Handling', () => {
+    it('should return 500 on GET /queries if manager throws', async () => {
+      jest.spyOn(libraryManager, 'getQueriesByLibrary').mockRejectedValueOnce(new Error('Internal Server Error'));
+      const response = await app.inject({ method: 'GET', url: `/queries?libraryId=${defaultTestLibraryId}` });
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toBe('Internal Server Error');
+      jest.restoreAllMocks();
+    });
+
+    it('should return 500 on POST /queries if manager throws (non-404 error)', async () => {
+      jest.spyOn(libraryManager, 'addQueryToLibrary').mockRejectedValueOnce(new Error('Another Internal Error'));
+      const response = await app.inject({
+        method: 'POST',
+        url: '/queries',
+        payload: { libraryId: defaultTestLibraryId, name: 'error-test', query: 'SELECT 1' },
+      });
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toBe('Another Internal Error');
+      jest.restoreAllMocks();
+    });
+
+     it('should return 404 on POST /queries if manager throws "not found"', async () => {
+      jest.spyOn(libraryManager, 'addQueryToLibrary').mockRejectedValueOnce(new Error('Library X not found'));
+      const response = await app.inject({
+        method: 'POST',
+        url: '/queries',
+        payload: { libraryId: 'X', name: 'error-test', query: 'SELECT 1' },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(JSON.parse(response.body).error).toBe('Library X not found');
+      jest.restoreAllMocks();
+    });
+
+    it('should return 500 on GET /queries/:id if manager throws', async () => {
+      jest.spyOn(libraryManager, 'getQueryById').mockRejectedValueOnce(new Error('DB Read Error'));
+      const response = await app.inject({ method: 'GET', url: '/queries/some-id' });
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toBe('DB Read Error');
+      jest.restoreAllMocks();
+    });
+
+    it('should return 500 on PUT /queries/:id if manager throws', async () => {
+      jest.spyOn(libraryManager, 'updateQuery').mockRejectedValueOnce(new Error('DB Write Error'));
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/queries/some-id',
+        payload: { name: 'update-error', query: 'SELECT 2' },
+      });
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toBe('DB Write Error');
+      jest.restoreAllMocks();
+    });
+
+    it('should return 500 on DELETE /queries/:id if manager throws', async () => {
+      jest.spyOn(libraryManager, 'removeQuery').mockRejectedValueOnce(new Error('DB Delete Error'));
+      const response = await app.inject({ method: 'DELETE', url: '/queries/some-id' });
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toBe('DB Delete Error');
+      jest.restoreAllMocks();
+    });
+
+    it('should return 500 on GET /queries/:id/variables if manager throws', async () => {
+      jest.spyOn(libraryManager, 'getQueryById').mockRejectedValueOnce(new Error('Var Read Error'));
+      const response = await app.inject({ method: 'GET', url: '/queries/some-id/variables' });
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toBe('Var Read Error');
+      jest.restoreAllMocks();
+    });
+  });
 
 });
