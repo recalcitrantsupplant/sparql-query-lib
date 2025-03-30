@@ -72,3 +72,9 @@ export interface StoredQuery {
   updatedAt: Date;
   variables?: VariableGroup[];
 }
+
+export interface Library {
+    id: string;
+    name: string;
+    queries: StoredQuery[];
+}

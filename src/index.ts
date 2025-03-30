@@ -2,9 +2,20 @@
 import Fastify, { FastifyPluginAsync } from 'fastify';
 import { registerQueryRoutes } from './server/query';
 import { registerBackendRoutes } from './server/backend';
+import { registerLibraryRoutes } from './server/libraries';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
 import fastifyCors from '@fastify/cors';
+import { FileSystemQueryStorage } from './server/queryStorage';
+import { QueryManager } from './server/queryManager';
+import { LibraryManager } from './server/libraryManager';
+import { config } from './server/config'; // Import config
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    libraryManager: LibraryManager;
+  }
+}
 
 const start = async () => {
   const app = Fastify({
@@ -48,8 +59,23 @@ const start = async () => {
       staticCSP: false
     });
 
+    // Instantiate storage with the path from config
+    const storage = new FileSystemQueryStorage(config.queriesFilePath);
+    // Instantiate LibraryManager first and initialize it, passing the storage instance
+    const libraryManager = new LibraryManager(storage);
+    await libraryManager.initialize();
+
+    // QueryManager now only needs LibraryManager
+    const queryManager = new QueryManager(libraryManager);
+    // No longer need queryManager.initialize()
+
+    app.decorate('libraryManager', libraryManager);
+    // Decorate queryManager as it's likely needed by query routes
+    app.decorate('queryManager', queryManager);
+
     await app.register(registerBackendRoutes as FastifyPluginAsync);
     await app.register(registerQueryRoutes as FastifyPluginAsync);
+    await app.register(registerLibraryRoutes as FastifyPluginAsync);
     console.log('Routes registered');
 
     try {

@@ -1,88 +1,32 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { executeQuery } from './http';
-// randomUUID is now handled within QueryManager
 import { StoredQuery, VariableRestrictions, VariableGroup } from '../types'; // Keep types
-// fs and path are now handled within FileSystemQueryStorage
 import { backendState } from './backend';
-// SparqlQueryParser is now handled within QueryManager/FileSystemQueryStorage
 import { config } from './config';
 import { performance } from 'perf_hooks';
 import { FileSystemQueryStorage } from './queryStorage'; // Import storage
 import { QueryManager } from './queryManager'; // Import manager
+import { LibraryManager } from './libraryManager';
 
-// Remove old file-based functions and global variable
-/*
-const QUERIES_PATH = path.join(__dirname, 'queries.json');
-
-async function readQueries(): Promise<StoredQuery[]> {
-  try {
-    const data = await fs.readFile(QUERIES_PATH, 'utf8');
-    let queries: StoredQuery[] = JSON.parse(data);
-
-    // Generate variables if they are missing or an empty array
-    for (const query of queries) {
-      if (!query.variables || query.variables.length === 0) {
-        try {
-          const parser = new SparqlQueryParser();
-          const parsedQuery = parser.parseQuery(query.query);
-          const detectedVariables = parser.detectVariables(query.query);
-          query.variables = detectedVariables.map(group => {
-            const vars: { [variableName: string]: VariableRestrictions } = {};
-            group.forEach(name => {
-              vars[name] = { type: ['uri', 'literal'] }; // Default to both types
-            });
-            return { vars };
-          });
-        } catch (error) {
-          console.error(`Error parsing query ${query.id}:`, error);
-          query.variables = [];
-        }
-      }
-    }
-
-    return queries;
-  } catch (error: any) {
-    console.error('Error reading queries.json:', error);
-    if (error instanceof SyntaxError) {
-      console.error('Invalid JSON in queries.json, attempting to recover');
-      try {
-        await fs.readFile(QUERIES_PATH, 'utf8');
-        throw error; // Re-throw the original SyntaxError
-      } catch (recoveryError) {
-        console.error('Failed to recover queries.json:', recoveryError);
-        throw error; // Re-throw the original SyntaxError
-      }
-    }
-    throw error; // Re-throw the original error
+// Extend FastifyInstance types if not already done globally
+declare module 'fastify' {
+  interface FastifyInstance {
+    queryManager: QueryManager;
+    libraryManager: LibraryManager; // Ensure this is declared
   }
 }
-
-async function writeQueries(queries: StoredQuery[]): Promise<void> {
-  try {
-    await fs.writeFile(QUERIES_PATH, JSON.stringify(queries, null, 2), 'utf8');
-  } catch (error) {
-    console.error('Error writing queries.json:', error);
-  }
-}
-
-function generateId(): string {
-}
-*/
-
-// No longer need global queries array:
-// let queries: StoredQuery[] = [];
 
 export async function registerQueryRoutes(app: FastifyInstance) {
 
-  // Instantiate storage and manager
-  const storage = new FileSystemQueryStorage();
-  const queryManager = new QueryManager(storage);
+  // Managers are now decorated onto the app instance in src/index.ts
+  // const storage = new FileSystemQueryStorage(); // Removed
+  // const queryManager = new QueryManager(storage); // Removed
+  // const libraryManager = queryManager['libraryManager']; // Removed
 
-  // Initialize the manager (loads queries into memory)
-  await queryManager.initialize();
-  // Removed old try/catch block for readQueries
+  // Initialization is handled in src/index.ts
+  // await queryManager.initialize(); // Removed
 
-  // List all queries
+  // List queries for the CURRENT library
   app.get<{ Querystring: { page?: number; limit?: number; sort?: string; order?: string } }>('/queries', {
     schema: {
       tags: ['Query'],
@@ -100,14 +44,20 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Querystring: { page?: number; limit?: number; sort?: string; order?: string } }>, reply: FastifyReply) => {
     const { page = 1, limit = 10, sort, order } = request.query; // Default page/limit
-    const allQueries = queryManager.getAllQueries(); // Use manager
 
-    // Basic pagination/sorting can be added here if needed, operating on allQueries
-    // For now, just return all data
+    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
+    if (!currentLibraryId) {
+        return reply.status(400).send({ error: 'No active library set or found.' });
+    }
+
+    const library = app.libraryManager.getLibraries().find(lib => lib.id === currentLibraryId);
+    const queries = library ? library.queries : [];
+
+    // TODO: Implement pagination/sorting on 'queries' array if needed
     return {
-      data: allQueries,
+      data: queries,
       metadata: {
-        total: allQueries.length,
+        total: queries.length,
         page: page,
         limit: limit
       }
@@ -130,9 +80,13 @@ export async function registerQueryRoutes(app: FastifyInstance) {
       }
     }
   }, async (request: FastifyRequest<{ Body: { name: string; description?: string; query: string } }>, reply: FastifyReply) => {
+    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
+    if (!currentLibraryId) {
+        return reply.status(400).send({ error: 'Cannot create query: No active library set.' });
+    }
     try {
-      // Delegate creation entirely to the manager
-      const newQuery = await queryManager.createQuery(request.body);
+      // Delegate creation entirely to the manager, passing libraryId
+      const newQuery = await app.queryManager.createQuery(currentLibraryId, request.body);
       reply.status(201).send(newQuery);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to create query.';
@@ -157,7 +111,14 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const query = queryManager.getQueryById(queryId); // Use manager
+    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
+    if (!currentLibraryId) {
+        // Although getting a query might not strictly need an *active* library,
+        // our QueryManager now requires it. Adjust if needed.
+        return reply.status(400).send({ error: 'Cannot get query: No active library set.' });
+    }
+
+    const query = app.queryManager.getQueryById(currentLibraryId, queryId); // Use manager with libraryId
 
     if (query) {
       reply.status(200).send(query);
@@ -191,16 +152,24 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     } // End schema
   }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { name: string; description?: string; query: string } }>, reply: FastifyReply) => {
         const { queryId } = request.params;
+        const currentLibraryId = app.libraryManager.getCurrentLibraryId();
+        if (!currentLibraryId) {
+            return reply.status(400).send({ error: 'Cannot update query: No active library set.' });
+        }
 
         try {
-            // Delegate update entirely to the manager
-            const updatedQuery = await queryManager.updateQuery(queryId, request.body);
+            // Delegate update entirely to the manager, passing libraryId
+            const updatedQuery = await app.queryManager.updateQuery(currentLibraryId, queryId, request.body);
 
+            // updateQuery now throws on not found, so no need to check null
+            reply.status(200).send(updatedQuery);
+            /* Original check removed as updateQuery throws now:
             if (updatedQuery) {
                 reply.status(200).send(updatedQuery);
             } else {
                 reply.status(404).send({ error: 'Query not found' });
             }
+            */ // Add missing closing comment tag
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Failed to update query.';
             console.error('Error processing update query request:', error);
@@ -223,10 +192,14 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
         const { queryId } = request.params;
+        const currentLibraryId = app.libraryManager.getCurrentLibraryId();
+        if (!currentLibraryId) {
+            return reply.status(400).send({ error: 'Cannot delete query: No active library set.' });
+        }
 
         try {
-            // Delegate deletion entirely to the manager
-            const deleted = await queryManager.deleteQuery(queryId);
+            // Delegate deletion entirely to the manager, passing libraryId
+            const deleted = await app.queryManager.deleteQuery(currentLibraryId, queryId);
 
             if (deleted) {
                 reply.status(204).send();
@@ -255,10 +228,14 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const query = queryManager.getQueryById(queryId); // Use manager
+    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
+     if (!currentLibraryId) {
+        return reply.status(400).send({ error: 'Cannot list variables: No active library set.' });
+    }
+    const query = app.queryManager.getQueryById(currentLibraryId, queryId); // Use manager with libraryId
 
     if (!query) {
-      reply.status(404).send({ error: 'Query not found' });
+      reply.status(404).send({ error: 'Query not found in active library' });
       return; // Added return
     }
 
@@ -298,10 +275,14 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
    }, async (request: FastifyRequest<{ Params: { queryId: string }, Body: { [variable: string]: any } }>, reply: FastifyReply) => {
     const { queryId } = request.params;
-    const query = queryManager.getQueryById(queryId); // Use manager
+    const currentLibraryId = app.libraryManager.getCurrentLibraryId();
+     if (!currentLibraryId) {
+        return reply.status(400).send({ error: 'Cannot execute query: No active library set.' });
+    }
+    const query = app.queryManager.getQueryById(currentLibraryId, queryId); // Use manager with libraryId
 
     if (!query) {
-      reply.status(404).send({ error: 'Query not found' });
+      reply.status(404).send({ error: 'Query not found in active library' });
       return; // Added return
     }
 
