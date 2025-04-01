@@ -2,7 +2,6 @@ import { start } from '../src/index';
 import Fastify from 'fastify'; // Import Fastify itself for mocking
 import { FileSystemLibraryStorage } from '../src/server/libraryStorage';
 import { FileSystemBackendStorage } from '../src/server/backendStorage';
-import { LibraryManager } from '../src/server/libraryManager';
 import { registerBackendRoutes } from '../src/server/backend';
 import { registerQueryRoutes } from '../src/server/query';
 import { registerLibraryRoutes } from '../src/server/libraries';
@@ -37,13 +36,12 @@ jest.mock('@fastify/swagger-ui', () => jest.fn((_app, _opts) => Promise.resolve(
 jest.mock('../src/server/libraryStorage');
 jest.mock('../src/server/backendStorage');
 
-// Mock Manager constructor and initialize method
+// Mock Manager's initialize method using spyOn
 const mockInitialize = jest.fn();
-jest.mock('../src/server/libraryManager');
-const MockLibraryManager = LibraryManager as jest.MockedClass<typeof LibraryManager>;
-MockLibraryManager.mockImplementation(() => ({
-    initialize: mockInitialize,
-} as any)); // Cast to any to satisfy constructor/prototype mocking
+// We need to import the real LibraryManager now
+import { LibraryManager as RealLibraryManager } from '../src/server/libraryManager';
+jest.spyOn(RealLibraryManager.prototype, 'initialize').mockImplementation(mockInitialize);
+
 
 // Mock Route registration functions
 jest.mock('../src/server/backend', () => ({ registerBackendRoutes: jest.fn() }));
@@ -65,7 +63,7 @@ describe('index.ts - start function', () => {
     // Ensure mocked constructors are cleared if needed (depends on test specifics)
     (FileSystemLibraryStorage as jest.Mock).mockClear();
     (FileSystemBackendStorage as jest.Mock).mockClear();
-    MockLibraryManager.mockClear();
+    // mockInitialize is cleared via jest.clearAllMocks() as it's a jest.fn()
   });
 
   afterAll(() => {
@@ -83,7 +81,7 @@ describe('index.ts - start function', () => {
     expect(Fastify).toHaveBeenCalledTimes(1);
     expect(FileSystemLibraryStorage).toHaveBeenCalledTimes(1);
     expect(FileSystemBackendStorage).toHaveBeenCalledTimes(1);
-    expect(LibraryManager).toHaveBeenCalledTimes(1);
+    // LibraryManager constructor call is implicitly tested by checking mockInitialize
     expect(mockInitialize).toHaveBeenCalledTimes(1); // LibraryManager init
 
     // Check registrations: cors, swagger, swagger-ui, 3 route registers
@@ -97,8 +95,10 @@ describe('index.ts - start function', () => {
 
     // Check decorations
     expect(mockDecorate).toHaveBeenCalledTimes(2);
-    expect(mockDecorate).toHaveBeenCalledWith('libraryManager', expect.any(LibraryManager));
-    expect(mockDecorate).toHaveBeenCalledWith('backendStorage', expect.any(FileSystemBackendStorage));
+    // Now expect the real LibraryManager instance
+    expect(mockDecorate).toHaveBeenCalledWith('libraryManager', expect.any(RealLibraryManager));
+    // Check against the instance created by the mocked constructor for storage
+    expect(mockDecorate).toHaveBeenCalledWith('backendStorage', (FileSystemBackendStorage as jest.Mock).mock.instances[0]);
 
     // Check listen call
     expect(mockListen).toHaveBeenCalledWith({ port: 3000, host: '0.0.0.0' });

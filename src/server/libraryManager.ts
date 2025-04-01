@@ -1,60 +1,48 @@
 import { randomUUID } from 'crypto';
-import { Library, StoredQuery } from '../types';
+import { Library, StoredQuery, VariableGroup } from '../types'; // Import VariableGroup if needed for variable detection later
 import { ILibraryStorage } from './libraryStorage'; // Updated import path and interface name
+import { SparqlQueryParser } from '../lib/parser'; // Import the parser
 
 export class LibraryManager {
     // Libraries are now primarily managed by the storage layer.
     // We might keep a cache, but for simplicity now, we'll fetch when needed.
-    // private libraries: Library[] = []; // Removed in-memory cache for now
     private storage: ILibraryStorage; // Use the new interface
+    private parser: SparqlQueryParser; // Add parser instance
 
     constructor(storage: ILibraryStorage) { // Update constructor parameter type
         this.storage = storage;
+        this.parser = new SparqlQueryParser(); // Instantiate the parser
     }
 
     /**
-    /**
      * Optional: Pre-load or check storage status if needed during initialization.
-     * For now, initialization might just involve ensuring the storage is ready.
-     * The concept of a 'default' library creation might move elsewhere or be handled
-     * by the storage implementation if the file doesn't exist.
      */
     async initialize(): Promise<void> {
         try {
-            // Example: Check if storage is accessible or load initial cache if desired
             await this.storage.getAllLibraries(); // Example: Trigger initial load/check
             console.log('LibraryManager initialized. Storage connection verified.');
         } catch (error) {
             console.error('Failed to initialize LibraryManager or connect to storage:', error);
-            // Depending on requirements, might throw or handle differently
             throw new Error(`Failed to initialize LibraryManager: ${error instanceof Error ? error.message : error}`);
         }
     }
 
      /**
      * Creates a new library using the storage layer.
-     * @param name The name for the new library.
-     * @param description Optional description.
      */
     async createLibrary(name: string, description?: string): Promise<Library> {
-        // Delegate directly to storage
         return this.storage.addLibrary({ name, description });
     }
-
-    // REMOVED: setCurrentLibrary, getCurrentLibraryName, getCurrentLibraryId
-    // These are now concerns of the request/session layer, not the manager.
 
     /**
      * Returns all libraries by fetching from the storage layer.
      */
     async getLibraries(): Promise<Library[]> {
-        // Delegate directly to storage
         return this.storage.getAllLibraries();
     }
 
      /**
      * Gets a specific library by ID from the storage layer.
-     * @param id The ID of the library.
      */
     async getLibraryById(id: string): Promise<Library | null> {
         return this.storage.getLibraryById(id);
@@ -62,8 +50,6 @@ export class LibraryManager {
 
     /**
      * Updates library metadata (name, description).
-     * @param id The ID of the library to update.
-     * @param data Object containing fields to update (e.g., { name: 'New Name' }).
      */
     async updateLibrary(id: string, data: Partial<Omit<Library, 'id' | 'queries'>>): Promise<Library | null> {
         return this.storage.updateLibrary(id, data);
@@ -73,40 +59,69 @@ export class LibraryManager {
     // --- Query Management Methods (Delegating to Storage) ---
 
     /**
-     * Adds a query to the specified library using the storage layer.
+     * Adds a query to the specified library, detecting outputs automatically.
      * @param libraryId The ID of the target library.
-     * @param queryData Data for the new query (name, description, query text, etc.).
+     * @param queryData Data for the new query (name, description, query text).
      */
-    async addQueryToLibrary(libraryId: string, queryData: Omit<StoredQuery, 'id' | 'createdAt' | 'updatedAt'>): Promise<StoredQuery> {
-        // Delegate directly to storage
-        return this.storage.addQuery(libraryId, queryData);
+    async addQueryToLibrary(libraryId: string, queryData: Omit<StoredQuery, 'id' | 'createdAt' | 'updatedAt' | 'variables' | 'outputs'>): Promise<StoredQuery> {
+        let detectedOutputs: string[] = [];
+        // let detectedVariables: VariableGroup[] = []; // For future variable detection refinement
+
+        try {
+            // detectedVariables = this.parser.detectVariables(queryData.query);
+            detectedOutputs = this.parser.detectQueryOutputs(queryData.query);
+        } catch (parseError) {
+            console.error(`Failed to parse query during add: ${queryData.query}`, parseError);
+            throw new Error(`Invalid SPARQL query provided: ${parseError instanceof Error ? parseError.message : parseError}`);
+        }
+
+        // Construct the full query object including detected outputs
+        const fullQueryData: Omit<StoredQuery, 'id' | 'createdAt' | 'updatedAt'> = {
+            ...queryData,
+            // variables: detectedVariables,
+            outputs: detectedOutputs
+        };
+
+        // Delegate to storage with the complete data
+        return this.storage.addQuery(libraryId, fullQueryData);
     }
 
     /**
-     * Updates a query using the storage layer.
-     * Note: The storage layer handles finding the query across libraries.
+     * Updates a query. If the query text is updated, outputs are re-detected.
      * @param queryId The ID of the query to update.
      * @param updatedQueryData Object containing fields to update.
      */
-    async updateQuery(queryId: string, updatedQueryData: Partial<Omit<StoredQuery, 'id' | 'libraryId'>>): Promise<StoredQuery | null> {
-        // Delegate directly to storage
-        return this.storage.updateQuery(queryId, updatedQueryData);
+    async updateQuery(queryId: string, updatedQueryData: Partial<Omit<StoredQuery, 'id' | 'libraryId' | 'createdAt' | 'updatedAt'>>): Promise<StoredQuery | null> {
+        // Create a mutable copy to potentially add detected fields
+        const dataToUpdate: Partial<StoredQuery> = { ...updatedQueryData };
+
+        // If the query string itself is being updated, re-detect outputs
+        if (dataToUpdate.query) {
+            try {
+                // dataToUpdate.variables = this.parser.detectVariables(dataToUpdate.query); // For future variable detection
+                dataToUpdate.outputs = this.parser.detectQueryOutputs(dataToUpdate.query);
+            } catch (parseError) {
+                console.error(`Failed to parse query during update: ${dataToUpdate.query}`, parseError);
+                throw new Error(`Invalid SPARQL query provided for update: ${parseError instanceof Error ? parseError.message : parseError}`);
+            }
+        }
+        // Note: If 'query' is not in updatedQueryData, 'outputs' will not be recalculated.
+        // If 'outputs' is explicitly provided in updatedQueryData, it will overwrite any detected value.
+
+        // Delegate to storage with potentially updated outputs
+        // The storage layer needs to handle Partial<StoredQuery> correctly
+        return this.storage.updateQuery(queryId, dataToUpdate);
     }
 
     /**
      * Removes a query using the storage layer.
-     * Note: The storage layer handles finding the query across libraries.
-     * @param queryId The ID of the query to remove.
-     * @returns True if the query was found and removed, false otherwise.
      */
     async removeQuery(queryId: string): Promise<boolean> {
-        // Delegate directly to storage
         return this.storage.deleteQuery(queryId);
     }
 
     /**
      * Gets all queries for a specific library from the storage layer.
-     * @param libraryId The ID of the library.
      */
     async getQueriesByLibrary(libraryId: string): Promise<StoredQuery[]> {
         return this.storage.getQueriesByLibraryId(libraryId);
@@ -114,7 +129,6 @@ export class LibraryManager {
 
     /**
      * Gets a specific query by its ID from the storage layer.
-     * @param queryId The ID of the query.
      */
     async getQueryById(queryId: string): Promise<StoredQuery | null> {
         return this.storage.getQueryById(queryId);
@@ -125,11 +139,8 @@ export class LibraryManager {
 
     /**
      * Deletes a library using the storage layer.
-     * @param id The ID of the library to delete.
-     * @returns True if the library was found and deleted, false otherwise.
      */
     async deleteLibrary(id: string): Promise<boolean> {
-        // Delegate directly to storage
         return this.storage.deleteLibrary(id);
     }
 }

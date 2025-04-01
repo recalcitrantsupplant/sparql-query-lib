@@ -243,6 +243,62 @@ export async function registerQueryRoutes(app: FastifyInstance) {
     }
   });
 
+  // Get outputs for a query by its ID
+  app.get<{ Params: { queryId: string } }>('/queries/:queryId/outputs', {
+    schema: {
+      tags: ['Query'],
+      operationId: 'getQueryOutputsById',
+      description: 'Retrieves the detected output variables/aliases for a stored query.',
+      params: {
+        type: 'object',
+        properties: {
+          queryId: { type: 'string', description: 'ID of the query' }
+        },
+        required: ['queryId']
+      },
+      response: {
+        200: {
+          description: 'Successful retrieval',
+          type: 'array',
+          items: { type: 'string' },
+          example: ['subject', 'predicate', 'object_count']
+        },
+        404: {
+          description: 'Query not found',
+          type: 'object',
+          properties: {
+            error: { type: 'string' }
+          }
+        },
+        500: {
+          description: 'Internal server error',
+          type: 'object',
+          properties: {
+            error: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (request: FastifyRequest<{ Params: { queryId: string } }>, reply: FastifyReply) => {
+    const { queryId } = request.params;
+
+    try {
+        const query = await app.libraryManager.getQueryById(queryId);
+
+        if (!query) {
+          reply.status(404).send({ error: `Query with ID ${queryId} not found` });
+          return;
+        }
+
+        // Return the stored outputs, or an empty array if none exist
+        reply.status(200).send(query.outputs || []);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to get query outputs.';
+        console.error(`Error getting outputs for query ${queryId}:`, error);
+        reply.status(500).send({ error: errorMessage });
+    }
+  });
+
   // Execute a query by its ID using a specified backend
   // Body now includes backendId and the bindings array
   app.post<{ Params: { queryId: string }, Body: { backendId: string; bindings: any } }>('/queries/:queryId/execute', {

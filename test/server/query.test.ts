@@ -289,12 +289,12 @@ describe('Query Routes Tests (Inject)', () => {
 
    it('should return 404 when trying to update a non-existent query', async () => { // Expect 404 if manager returns null
         // No need to set current library
-        const updateResponse = await app.inject({
-            method: 'PUT',
-            url: '/queries/non-existent-for-update',
-            payload: { name: 'update-fail', query: 'SELECT 1' },
-        });
-        // Assuming the route handler checks the result of manager.updateQuery
+         const updateResponse = await app.inject({
+             method: 'PUT',
+             url: '/queries/non-existent-for-update',
+             payload: { name: 'update-fail', query: 'SELECT * WHERE { ?s ?p ?o }' }, // Use valid SPARQL
+         });
+         // Assuming the route handler checks the result of manager.updateQuery
         // and returns 404 if it's null (query not found).
         expect(updateResponse.statusCode).toBe(404);
         // const body = JSON.parse(updateResponse.body);
@@ -309,7 +309,7 @@ describe('Query Routes Tests (Inject)', () => {
     const createResponse = await app.inject({
       method: 'POST',
       url: '/queries',
-      payload: { libraryId: defaultTestLibraryId, name: queryNameToDelete, query: 'SELECT 1' }, // Specify library
+      payload: { libraryId: defaultTestLibraryId, name: queryNameToDelete, query: 'SELECT * WHERE { ?s ?p ?o }' }, // Use valid SPARQL
     });
     expect(createResponse.statusCode).toBe(201);
     const createdQuery = JSON.parse(createResponse.body) as StoredQuery;
@@ -419,8 +419,6 @@ describe('Query Routes Tests (Inject)', () => {
   });
 
 
-  // TODO: Test for execute query requires mocking 'executeQuery' or setting up a backend/storage for it
-  it.todo('should execute a query with variables');
   /*
   it('should attempt to execute a query (mocked backend)', async () => {
     // First, create a query
@@ -556,6 +554,48 @@ describe('Query Routes Tests (Inject)', () => {
 
       // Restore spy
       jest.restoreAllMocks();
+    });
+
+    // Test for executing a query with variables (bindings) - Moved inside describe block
+    it('should execute a query with variables', async () => {
+      // Use the testQuery and testBackend created in the beforeEach block
+      const mockResultBody = { results: { bindings: [{ s: { type: 'uri', value: 'http://example.com/bound' } }] } };
+      mockExecuteQuery.mockResolvedValue({
+        statusCode: 200,
+        headers: { 'content-type': 'application/sparql-results+json' },
+        body: { json: jest.fn().mockResolvedValue(mockResultBody) }
+      });
+
+      // Define a sample non-empty bindings payload based on schema example structure
+      const bindingsPayload = [
+        {
+          head: { vars: ["var1"] },
+          arguments: {
+            bindings: [
+              { var1: { type: "uri", value: "http://example.org/value1" } }
+            ]
+          }
+        }
+      ];
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/queries/${testQuery.id}/execute`,
+        payload: {
+          backendId: testBackend.id,
+          bindings: bindingsPayload, // Pass the non-empty bindings
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toEqual(mockResultBody);
+      // Verify executeQuery was called with the correct arguments, including the bindings
+      expect(mockExecuteQuery).toHaveBeenCalledWith(
+        backendStorage,
+        testQuery.query,
+        testBackend.id,
+        bindingsPayload // Check that the bindings were passed correctly
+      );
     });
   });
 

@@ -71,6 +71,7 @@ export interface StoredQuery {
   createdAt: Date;
   updatedAt: Date;
   variables?: VariableGroup[];
+  outputs?: string[]; // Optional array of output variable names/aliases
 }
 
 export interface Library {
