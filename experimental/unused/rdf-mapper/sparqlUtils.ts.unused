@@ -1,0 +1,153 @@
+import type { Quad, Term, NamedNode, Literal, BlankNode, DefaultGraph } from '@rdfjs/types';
+import type { MappingConfiguration } from './types'; // Import mapping types
+
+// Helper to format a single RDF/JS Term for SPARQL syntax
+function formatRdfTerm(term: Term): string {
+    switch (term.termType) {
+        case 'NamedNode':
+            return `<${term.value}>`;
+        case 'Literal':
+            // Escape double quotes within the literal value
+            const escapedValue = term.value.replace(/"/g, '\\"');
+            if (term.language) {
+                return `"${escapedValue}"@${term.language}`;
+            } else if (term.datatype && term.datatype.value !== 'http://www.w3.org/2001/XMLSchema#string') {
+                // Add datatype only if it's not the default xsd:string
+                return `"${escapedValue}"^^<${term.datatype.value}>`;
+            } else {
+                // Simple literal (implicitly xsd:string)
+                return `"${escapedValue}"`;
+            }
+        case 'BlankNode':
+            // SPARQL uses the _:label syntax for blank nodes
+            return `_:${term.value}`;
+        case 'DefaultGraph':
+            // DefaultGraph typically isn't used directly in triple patterns,
+            // but handle defensively
+            return '<urn:rdf:defaultGraph>'; // Or throw error?
+        case 'Variable':
+             // Variables shouldn't appear in INSERT DATA, but handle defensively
+            return `?${term.value}`;
+        default:
+            // Should not happen with standard RDF/JS terms
+            console.warn('Unknown RDF term type:', term);
+            return `"${String(term.value).replace(/"/g, '\\"')}"`;
+    }
+}
+
+// Function to convert an array of RDF/JS Quads to an INSERT DATA query string
+function quadsToInsertDataQuery(quads: Quad[], graphUri?: string): string {
+    if (!quads || quads.length === 0) {
+        return ''; // Or throw an error
+    }
+
+    // Group quads by graph for potential GRAPH clauses
+    // For now, we assume all quads go to the specified graphUri or the default graph
+
+    const triplePatterns = quads
+        .map(quad => {
+            // We ignore quad.graph here and rely on the graphUri parameter
+            // or the default graph context of the SPARQL endpoint.
+            // A more sophisticated version could generate multiple GRAPH clauses.
+            const subject = formatRdfTerm(quad.subject);
+            const predicate = formatRdfTerm(quad.predicate);
+            const object = formatRdfTerm(quad.object);
+            return `  ${subject} ${predicate} ${object} .`;
+        })
+        .join('\n');
+
+    if (graphUri) {
+        // Insert data into a specific named graph
+        return `INSERT DATA {\n  GRAPH <${graphUri}> {\n${triplePatterns}\n  }\n}`;
+    } else {
+        // Insert data into the default graph
+        return `INSERT DATA {\n${triplePatterns}\n}`;
+    }
+}
+
+/**
+ * Generates a SPARQL SELECT query to fetch properties for a list of subject URIs
+ * based on a mapping configuration for a specific type.
+ * Uses the TypeScript property names as variable names in the SELECT clause where possible.
+ *
+ * @param uris An array of subject URIs (strings) to fetch data for.
+ * @param typeName The key in the mapping configuration for the object type.
+ * @param mappingConfig The mapping configuration.
+ * @param subjectVar The variable name to use for the subject URIs (defaults to 'uri').
+ * @returns A SPARQL SELECT query string.
+ */
+function generateSelectQueryForUris(
+    uris: string[],
+    typeName: string,
+    mappingConfig: MappingConfiguration,
+    subjectVar: string = 'uri' // Default to 'uri' as per user example
+): string {
+    if (!uris || uris.length === 0) {
+        // Return a query that yields no results
+        return `SELECT * WHERE { VALUES ?${subjectVar} { } }`;
+    }
+
+    const classMapping = mappingConfig[typeName];
+    if (!classMapping) {
+        throw new Error(`No mapping found for type: ${typeName}`);
+    }
+
+    const subjectVarWithQuestionMark = `?${subjectVar}`;
+    // Always select the subject URI and its rdf:type
+    const selectVariables: string[] = [subjectVarWithQuestionMark, '?rdfType'];
+    const wherePatterns: string[] = [];
+
+    // Add VALUES clause for the input URIs
+    const formattedUris = uris.map(uri => `<${uri}>`).join(' ');
+    wherePatterns.push(`VALUES ${subjectVarWithQuestionMark} { ${formattedUris} }`);
+
+    // Add rdf:type constraint and ensure we select the type URI
+    wherePatterns.push(`${subjectVarWithQuestionMark} <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?rdfType .`);
+    // Optional: Add constraint based on mapping if needed, but selecting type is primary
+    // wherePatterns.push(`${subjectVarWithQuestionMark} a <${classMapping.classUri}> .`); // 'a' is shortcut for rdf:type
+
+    // Add OPTIONAL patterns for each property
+    for (const tsPropertyName in classMapping.properties) {
+        const propMapping = classMapping.properties[tsPropertyName];
+        // Use the tsPropertyName directly as the variable, unless it's the special '@id' mapping
+        if (propMapping.uri === '@id') {
+            // If mapping defines '@id', ensure the subjectVar matches the tsPropertyName for consistency
+            // This assumes the TS property mapped to '@id' is the same as the desired subjectVar ('uri')
+            if (tsPropertyName !== subjectVar) {
+                 console.warn(`Mapping defines '@id' for property '${tsPropertyName}' but subject variable is '${subjectVar}'. Ensure consistency.`);
+            }
+            continue; // Don't create a separate pattern for the subject URI itself
+        }
+
+        // Use the TS property name as the variable name
+        const propVarWithQuestionMark = `?${tsPropertyName}`;
+
+        selectVariables.push(propVarWithQuestionMark);
+
+        // Use OPTIONAL to handle missing properties gracefully
+        wherePatterns.push(
+            `OPTIONAL { ${subjectVarWithQuestionMark} <${propMapping.uri}> ${propVarWithQuestionMark} . }`
+        );
+    }
+
+    // Ensure no duplicate variables in SELECT clause (e.g., if subjectVar is also a property name)
+    const uniqueSelectVariables = Array.from(new Set(selectVariables));
+
+    const selectClause = `SELECT DISTINCT ${uniqueSelectVariables.join(' ')}`;
+    const whereClause = `WHERE {\n  ${wherePatterns.join('\n  ')}\n}`;
+
+    return `${selectClause}\n${whereClause}`;
+}
+
+// Helper to format a single RDF/JS Quad into a SPARQL triple pattern string
+function quadToSparqlTriple(quad: Quad): string {
+    const subject = formatRdfTerm(quad.subject);
+    const predicate = formatRdfTerm(quad.predicate);
+    const object = formatRdfTerm(quad.object);
+    // Note: This ignores the graph component, assuming triples are for default graph
+    // or will be placed within a GRAPH clause later.
+    return `${subject} ${predicate} ${object} .`;
+}
+
+
+export { quadsToInsertDataQuery, formatRdfTerm, generateSelectQueryForUris, quadToSparqlTriple };

@@ -1,0 +1,669 @@
+import type { Term } from '@rdfjs/types';
+// Import types needed for augmented results
+import type {
+    AugmentedSparqlResults,
+    AugmentedSparqlBinding, // Use this for the main bindings array
+    SparqlBindingValue,     // Standard value type
+    AugmentedSparqlBindingValue // Value type that might contain nested results
+} from '../chained-select/types'; // Adjust path as needed
+import type { MappingConfiguration, PropertyMapping, ClassMapping } from './types';
+import { generateSelectQueryForUris } from './sparqlUtils';
+
+const xsd = 'http://www.w3.org/2001/XMLSchema#';
+
+// --- RDF -> Object Conversion ---
+
+/**
+ * Represents a single row (binding set) from a SPARQL SELECT query result.
+ * Keys are variable names (without '?'), values are RDF/JS Terms.
+ */
+interface SparqlBinding {
+  [variable: string]: Term;
+}
+
+/**
+ * The result of reconstructing objects from a SPARQL query result set.
+ */
+interface ReconstructionResult<T> {
+  /** The primary objects reconstructed from the results. */
+  objects: T[];
+  /**
+   * A map where keys are object type names (from MappingConfiguration)
+   * and values are arrays of unique URIs that need to be fetched
+   * in subsequent queries to populate nested object properties.
+   */
+  nextUrisToFetch: { [objectType: string]: string[] };
+}
+
+
+/**
+ * Converts SPARQL SELECT query results into TypeScript objects based on a mapping.
+ * This function processes one level of the object graph. It identifies URIs for
+ * nested objects but does not recursively fetch them.
+ *
+ * Assumes the SPARQL query selects the subject URI and properties corresponding
+ * to the mapping configuration for the given typeName. Variable names in the
+ * results are expected to align with the TS property names.
+ *
+ * @param results An array of SPARQL binding objects.
+ * @param typeName The key in the mapping configuration for the primary object type.
+ * @param mappingConfig The mapping configuration.
+ * @param subjectVar The name of the variable in the results holding the main subject URI (e.g., 'uri').
+ * @returns A ReconstructionResult containing the reconstructed objects and URIs for nested objects.
+ */
+function resultsToObject<T extends { [key: string]: any }>( // Ensure T can be indexed
+    results: SparqlBinding[],
+    typeName: string,
+    mappingConfig: MappingConfiguration,
+    subjectVar: string = 'uri' // Default subject variable name to 'uri'
+): ReconstructionResult<T> {
+
+    const classMapping = mappingConfig[typeName];
+    if (!classMapping) {
+        throw new Error(`No mapping found for type: ${typeName}`);
+    }
+
+    const objectsByUri: { [uri: string]: T } = {};
+    const nextUrisToFetch: { [objectType: string]: Set<string> } = {}; // Use Sets for uniqueness
+
+    // Using TS property name directly as variable convention
+    const getVarNameForProperty = (tsName: string): string => tsName;
+
+
+    for (const binding of results) {
+        const subjectTerm = binding[subjectVar];
+        if (!subjectTerm || subjectTerm.termType !== 'NamedNode') {
+            console.warn(`Skipping binding without valid NamedNode in subject variable '${subjectVar}':`, binding);
+            continue; // Skip if subject is not a NamedNode or missing
+        }
+        const subjectUri = subjectTerm.value;
+
+        // Initialize object if first time seeing this URI
+        if (!objectsByUri[subjectUri]) {
+            // Ensure the object has a property matching the subjectVar name convention
+            objectsByUri[subjectUri] = { [subjectVar]: subjectUri } as T;
+        }
+        const currentObject = objectsByUri[subjectUri];
+
+        // Store rdf:type if available
+        const rdfTypeTerm = binding['rdfType']; // Variable name from sparqlUtils.ts
+        if (rdfTypeTerm && rdfTypeTerm.termType === 'NamedNode' && !(currentObject as any)._rdfTypeUri) {
+             (currentObject as any)._rdfTypeUri = rdfTypeTerm.value;
+        }
+
+        // Iterate through properties defined in the mapping
+        for (const tsPropertyName in classMapping.properties) {
+            const propMapping = classMapping.properties[tsPropertyName];
+            // Skip the property mapped to '@id' as it's handled by subjectVar
+            if (propMapping.uri === '@id') {
+                // Optional: Verify tsPropertyName matches subjectVar if @id is used
+                if (tsPropertyName !== subjectVar) {
+                    console.warn(`Mapping defines '@id' for property '${tsPropertyName}' but subject variable is '${subjectVar}'. Ensure consistency.`);
+                }
+                continue;
+            }
+
+            const sparqlVarName = getVarNameForProperty(tsPropertyName);
+            const objectTerm = binding[sparqlVarName];
+
+            // Skip if no value for this variable in this binding
+            if (!objectTerm) {
+                continue;
+            }
+
+            const processValue = (valueTerm: Term) => {
+                if (propMapping.isObjectProperty) {
+                    if (valueTerm.termType === 'NamedNode') {
+                        const nestedObjectUri = valueTerm.value;
+                        const objectType = propMapping.objectType;
+                        if (!objectType) {
+                             console.warn(`Object property ${tsPropertyName} (URI: ${propMapping.uri}) is missing objectType in mapping for type ${typeName}.`);
+                             return;
+                        }
+
+                        // Store URI for later fetching
+                        if (!nextUrisToFetch[objectType]) {
+                            nextUrisToFetch[objectType] = new Set<string>();
+                        }
+                        nextUrisToFetch[objectType].add(nestedObjectUri);
+
+                        // Assign URI(s) to the property
+                        if (propMapping.isArray) {
+                            if (!(currentObject as any)[tsPropertyName]) (currentObject as any)[tsPropertyName] = [];
+                            // Avoid duplicates in the object's array
+                            if (!(currentObject as any)[tsPropertyName].includes(nestedObjectUri)) {
+                                (currentObject as any)[tsPropertyName].push(nestedObjectUri);
+                            }
+                        } else {
+                            // Only assign if not already assigned (first value wins for non-array)
+                            if ((currentObject as any)[tsPropertyName] === undefined) {
+                                (currentObject as any)[tsPropertyName] = nestedObjectUri;
+                            }
+                        }
+                    } else {
+                         console.warn(`Expected NamedNode for object property ${tsPropertyName} (var: ${sparqlVarName}), but got ${valueTerm.termType}. Skipping.`);
+                    }
+                } else { // Literal property
+                    if (valueTerm.termType === 'Literal') {
+                        let value: any = valueTerm.value;
+                        const datatype = valueTerm.datatype?.value;
+
+                        // Basic type conversion based on XSD datatype
+                        if (datatype === `${xsd}integer` || datatype === `${xsd}int`) {
+                            value = parseInt(value, 10);
+                        } else if (datatype === `${xsd}double` || datatype === `${xsd}float` || datatype === `${xsd}decimal`) {
+                            value = parseFloat(value);
+                        } else if (datatype === `${xsd}boolean`) {
+                            value = value.toLowerCase() === 'true' || value === '1';
+                        }
+                        // Add more conversions as needed (date, datetime, etc.)
+
+                        if (propMapping.isArray) {
+                            if (!(currentObject as any)[tsPropertyName]) (currentObject as any)[tsPropertyName] = [];
+                             // Avoid duplicates in the object's array
+                            if (!(currentObject as any)[tsPropertyName].includes(value)) {
+                                (currentObject as any)[tsPropertyName].push(value);
+                            }
+                        } else {
+                             // Only assign if not already assigned (first value wins for non-array)
+                            if ((currentObject as any)[tsPropertyName] === undefined) {
+                                (currentObject as any)[tsPropertyName] = value;
+                            }
+                        }
+                    } else {
+                         console.warn(`Expected Literal for data property ${tsPropertyName} (var: ${sparqlVarName}), but got ${valueTerm.termType}. Skipping.`);
+                    }
+                }
+            };
+
+            processValue(objectTerm);
+
+        } // End loop through properties
+    } // End loop through bindings
+
+
+    // Convert Set values in nextUrisToFetch to arrays
+    const finalNextUris: { [objectType: string]: string[] } = {};
+    for (const type in nextUrisToFetch) {
+        finalNextUris[type] = Array.from(nextUrisToFetch[type]);
+    }
+
+    return {
+        objects: Object.values(objectsByUri),
+        nextUrisToFetch: finalNextUris,
+    };
+}
+
+
+// --- Generic Fetching and Reconstruction Orchestrator ---
+
+/**
+ * Type definition for a function that executes a SPARQL SELECT query.
+ * @param query The SPARQL query string.
+ * @returns A promise that resolves to an array of SparqlBinding objects.
+ */
+type SparqlQueryExecutor = (query: string) => Promise<SparqlBinding[]>;
+
+/**
+ * Fetches and reconstructs a graph of objects starting from a list of URIs,
+ * handling nested objects recursively based on the mapping configuration.
+ *
+ * @param initialUris An array of starting URIs.
+ * @param initialTypeName The type name (from MappingConfiguration) for the initial URIs.
+ * @param mappingConfig The complete mapping configuration.
+ * @param executeQuery A function that takes a SPARQL query string and returns a Promise<SparqlBinding[]>.
+ * @param maxDepth Maximum recursion depth to prevent infinite loops (optional, defaults to 5).
+ * @param subjectVar The variable name used for the subject in queries (defaults to 'uri').
+ * @returns A Promise resolving to an array of the initial top-level objects, fully reconstructed.
+ */
+async function fetchAndReconstruct<T extends { [key: string]: any; uri: string }>( // Ensure T has uri and is indexable
+    initialUris: string[],
+    initialTypeName: string,
+    mappingConfig: MappingConfiguration,
+    executeQuery: SparqlQueryExecutor,
+    maxDepth: number = 5, // Add max depth to prevent potential cycles
+    subjectVar: string = 'uri' // Allow overriding subject variable
+): Promise<T[]> {
+
+    if (initialUris.length === 0) {
+        return [];
+    }
+
+    // Central store for all fetched/reconstructed objects, keyed by URI
+    const objectStore: Map<string, any> = new Map();
+    // URIs to fetch in the current iteration, grouped by type
+    let urisToFetch: Map<string, Set<string>> = new Map();
+    // URIs already queued or fetched to prevent redundant fetches within the process
+    const processedUris: Set<string> = new Set();
+
+    // Initialize with the starting URIs
+    const initialSet = new Set<string>();
+    initialUris.forEach(uri => {
+        if (!processedUris.has(uri)) {
+            initialSet.add(uri);
+            processedUris.add(uri);
+        }
+    });
+    if (initialSet.size > 0) {
+        urisToFetch.set(initialTypeName, initialSet);
+    }
+
+
+    let currentDepth = 0;
+    while (urisToFetch.size > 0 && currentDepth < maxDepth) {
+        const nextIterationUris: Map<string, Set<string>> = new Map(); // URIs discovered in this iteration
+        const fetchPromises: Promise<void>[] = []; // Promises for all fetches at this depth
+
+        for (const [typeName, urisSet] of urisToFetch) {
+            const uris = Array.from(urisSet);
+            if (uris.length === 0) continue;
+
+            const promise = (async () => {
+                try {
+                    const query = generateSelectQueryForUris(uris, typeName, mappingConfig, subjectVar);
+                    // console.log(`Depth ${currentDepth}, Type ${typeName}, Query:\n${query}`); // Debug logging
+                    const results = await executeQuery(query);
+                    // console.log(`Depth ${currentDepth}, Type ${typeName}, Results:`, results.length); // Debug logging
+
+                    const { objects, nextUrisToFetch: newlyDiscoveredUris } = resultsToObject<any>(
+                        results,
+                        typeName,
+                        mappingConfig,
+                        subjectVar
+                    );
+
+                    // Update object store
+                    for (const obj of objects) {
+                        const existingObj = objectStore.get(obj[subjectVar]); // Use subjectVar to get URI
+                        // Merge: prioritize newly fetched data over potentially stale data from other paths
+                        objectStore.set(obj[subjectVar], { ...existingObj, ...obj });
+                    }
+
+                    // Collect URIs for the next iteration
+                    for (const [nextTypeName, nextUrisArray] of Object.entries(newlyDiscoveredUris)) {
+                        if (!nextIterationUris.has(nextTypeName)) {
+                            nextIterationUris.set(nextTypeName, new Set());
+                        }
+                        const nextTypeSet = nextIterationUris.get(nextTypeName)!;
+                        for (const nextUri of nextUrisArray) {
+                            // Add only if not already fetched/queued in this whole process
+                            if (!processedUris.has(nextUri)) {
+                                nextTypeSet.add(nextUri);
+                                processedUris.add(nextUri); // Mark as queued for next iteration
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Error fetching or processing type ${typeName} for URIs ${uris.slice(0, 5).join(', ')}...:`, error);
+                    // Decide how to handle errors: continue, throw, etc.
+                }
+            })();
+            fetchPromises.push(promise);
+        }
+
+        await Promise.all(fetchPromises); // Wait for all fetches at this level
+
+        urisToFetch = nextIterationUris; // Set up for the next depth level
+        currentDepth++;
+    }
+
+    if (currentDepth >= maxDepth && urisToFetch.size > 0) {
+        console.warn(`Reached max fetch depth (${maxDepth}). Object graph might be incomplete.`);
+    }
+
+    // --- Stitching Phase ---
+    // Iterate through all objects we've fetched and resolve URI placeholders
+    for (const obj of objectStore.values()) {
+        // Determine typeName using the stored _rdfTypeUri
+        const rdfTypeUri = (obj as any)._rdfTypeUri;
+        let typeName: string | null = null;
+        if (rdfTypeUri) {
+            for (const name in mappingConfig) {
+                if (mappingConfig[name].classUri === rdfTypeUri) {
+                    typeName = name;
+                    break;
+                }
+            }
+        }
+
+        if (!typeName) {
+             console.warn(`Skipping stitching for object ${obj[subjectVar]} - could not determine type from stored rdf:type <${rdfTypeUri}> or mapping.`);
+             continue; // Cannot stitch without knowing the type and its mapping
+        }
+
+        const classMapping = mappingConfig[typeName]; // Already checked typeName exists
+        if (!classMapping) continue; // Should not happen if typeName is valid
+
+        for (const tsPropertyName in classMapping.properties) {
+            const propMapping = classMapping.properties[tsPropertyName];
+            // Ensure the property exists on the object before trying to stitch
+            if (propMapping.isObjectProperty && obj.hasOwnProperty(tsPropertyName) && obj[tsPropertyName] != null) {
+                const currentValues = obj[tsPropertyName];
+
+                if (propMapping.isArray) {
+                    // Handle array properties
+                    if (!Array.isArray(currentValues)) {
+                         console.warn(`Expected array for property ${tsPropertyName} of ${obj[subjectVar]} but got ${typeof currentValues}. Skipping stitching for this property.`);
+                         continue;
+                    }
+                    const resolvedArray: any[] = [];
+                    for (const uriOrObject of currentValues) {
+                        if (typeof uriOrObject === 'string') { // It's a URI placeholder
+                            const resolvedObject = objectStore.get(uriOrObject);
+                            if (resolvedObject) {
+                                resolvedArray.push(resolvedObject);
+                            } else {
+                                // console.warn(`Stitching: Could not find object for URI ${uriOrObject} in property ${tsPropertyName} of ${obj[subjectVar]}. Keeping URI.`);
+                                resolvedArray.push(uriOrObject); // Keep URI if not found
+                            }
+                        } else if (typeof uriOrObject === 'object' && uriOrObject !== null) {
+                            resolvedArray.push(uriOrObject); // Already an object
+                        } else {
+                             // Handle unexpected values in the array (null, undefined, etc.)
+                             // console.warn(`Unexpected value in array for property ${tsPropertyName} of ${obj[subjectVar]}: ${uriOrObject}. Skipping value.`);
+                        }
+                    }
+                    obj[tsPropertyName] = resolvedArray;
+                } else {
+                    // Handle single object property
+                    const uriOrObject = currentValues;
+                    if (typeof uriOrObject === 'string') { // It's a URI placeholder
+                         const resolvedObject = objectStore.get(uriOrObject);
+                         if (resolvedObject) {
+                            obj[tsPropertyName] = resolvedObject;
+                         } else {
+                            // console.warn(`Stitching: Could not find object for URI ${uriOrObject} in property ${tsPropertyName} of ${obj[subjectVar]}. Keeping URI.`);
+                            // Keep URI if not found
+                         }
+                    } else if (typeof uriOrObject !== 'object' || uriOrObject === null) {
+                         // Handle unexpected non-object, non-string values (e.g. if resultsToObject put null there)
+                         // console.warn(`Stitching: Unexpected value for property ${tsPropertyName} of ${obj[subjectVar]}: ${uriOrObject}. Expecting object or URI string.`);
+                    }
+                    // If it's already an object, do nothing
+                }
+            }
+        }
+    }
+
+    // Return only the objects corresponding to the initial URIs, now fully populated
+    return initialUris
+        .map(uri => objectStore.get(uri))
+        .filter(obj => obj !== undefined) as T[]; // Filter out any initial URIs that weren't found
+}
+
+// Removed the old findTypeNameForUri function as it's replaced by using _rdfTypeUri
+
+
+// --- Generic Parser for Augmented Results ---
+
+/**
+ * Converts a SPARQL binding value (literal) to a JavaScript type based on mapping.
+ */
+function convertSparqlValue(value: SparqlBindingValue, propMapping?: PropertyMapping): any {
+    if (value.type !== 'literal') {
+        // Handle URIs or BNodes if necessary, though typically used for literals here
+        return value.value;
+    }
+
+    let convertedValue: any = value.value;
+    const datatype = value.datatype || propMapping?.datatype; // Use value's datatype first, then mapping's
+
+    if (datatype) {
+        if (datatype === `${xsd}integer` || datatype === `${xsd}int` || datatype === `${xsd}long` || datatype === `${xsd}short` || datatype === `${xsd}byte`) {
+            convertedValue = parseInt(convertedValue, 10);
+        } else if (datatype === `${xsd}double` || datatype === `${xsd}float` || datatype === `${xsd}decimal`) {
+            convertedValue = parseFloat(convertedValue);
+        } else if (datatype === `${xsd}boolean`) {
+            convertedValue = convertedValue.toLowerCase() === 'true' || convertedValue === '1';
+        } else if (datatype === `${xsd}dateTime` || datatype === `${xsd}date`) {
+            try {
+                convertedValue = new Date(convertedValue);
+            } catch (e) {
+                console.warn(`Could not parse date/dateTime literal: ${convertedValue}`);
+                // Keep original string value if parsing fails
+            }
+        }
+        // Add more XSD type conversions as needed
+    }
+    // If no datatype or conversion rule, return the original string value
+
+    // Consider language tags if needed: value['xml:lang']
+
+    return convertedValue;
+}
+
+/**
+ * Type guard to check if a value is an AugmentedSparqlBindingValue with nested results.
+ */
+function isAugmentedBindingValue(value: any): value is AugmentedSparqlBindingValue {
+    return value && typeof value === 'object' && value.type && value.value !== undefined && value.results && value.results.bindings;
+}
+
+
+/**
+ * Parses augmented SPARQL results (with nested results embedded) into nested TypeScript objects
+ * based on a mapping configuration. It infers nesting relationships and variable names by convention.
+ *
+ * Conventions:
+ * - Root objects are identified by `rootSubjectVar`.
+ * - Child objects within nested results are identified by a variable name derived from lowercasing the `objectType` in the parent's mapping (e.g., `objectType: 'Hobby'` -> child subject var: `hobby`).
+ * - SPARQL variable names in bindings generally correspond to TypeScript property names defined as keys in the mapping's `properties` object.
+ * - Variables holding augmented (nested) results are linked to the corresponding `isObjectProperty` in the mapping.
+ *
+ * @template T The expected type of the root objects.
+ * @param augmentedResults The augmented results object from executeChainedQuery.
+ * @param rootTypeName The key in the mapping configuration for the root object type (e.g., 'Person').
+ * @param rootSubjectVar The variable name holding the root subject URI in the top-level bindings (e.g., 'person').
+ * @param mappingConfig The mapping configuration defining object structures and RDF mappings.
+ * @returns An array of reconstructed root objects of type T.
+ */
+function parseAugmentedResultsGeneric<T extends { [key: string]: any }>(
+    augmentedResults: AugmentedSparqlResults,
+    rootTypeName: string,
+    rootSubjectVar: string,
+    mappingConfig: MappingConfiguration
+): T[] {
+    const objectsMap = new Map<string, T>(); // Store root objects by URI
+
+    const rootClassMapping = mappingConfig[rootTypeName];
+    if (!rootClassMapping) {
+        throw new Error(`No mapping found for root type: ${rootTypeName}`);
+    }
+
+    // Helper to find the TS property name and mapping based on a SPARQL variable name
+    const findMappingForVariable = (variableName: string, classMapping: ClassMapping): { tsPropertyName: string | null, propMapping: PropertyMapping | null } => {
+        // Direct match: Check if variable name is a key in properties
+        if (classMapping.properties[variableName]) {
+            return { tsPropertyName: variableName, propMapping: classMapping.properties[variableName] };
+        }
+        // Indirect match (for augmented values): Find the object property this variable might be linking
+        // This assumes the variable holding the augmented result corresponds to the TS property name
+        // that defines the object relationship in the mapping.
+        for (const tsPropName in classMapping.properties) {
+            const propMap = classMapping.properties[tsPropName];
+            if (propMap.isObjectProperty && propMap.objectType) {
+                // If the variable name matches the TS property name for an object link, use that.
+                if (variableName === tsPropName) {
+                     return { tsPropertyName: tsPropName, propMapping: propMap };
+                }
+                // Add a check: maybe the variable name is the *predicate URI*? Unlikely for SELECT vars.
+                // Add a check: maybe the variable name is the *child subject var convention*? (e.g. 'hobby' for 'hobbies')
+                const inferredChildSubjectVar = propMap.objectType.toLowerCase();
+                if (variableName === inferredChildSubjectVar) {
+                     // This case is less likely for the *parent* binding variable holding the results,
+                     // but could be relevant inside the recursive call.
+                     // Let's stick to matching the TS property name for the augmented value container.
+                }
+                 // Fallback: If we find an object property, assume the current variable *might* be related.
+                 // This is ambiguous if multiple object properties exist.
+                 // Let's prioritize direct match on tsPropertyName first.
+                 // If no direct match, maybe return the first found object property? Risky.
+                 // Let's refine: Assume the variable holding the augmented result *is* the TS property name.
+                 // This requires the SELECT query to alias the link variable (e.g. `?hobbyUri AS ?hobbies`)
+                 // OR the executor to attach results to the TS property name.
+                 // Let's assume the executor attaches results to the `parentLinkVar` from QueryConfig.
+                 // The parser needs to map this `parentLinkVar` back to a TS property.
+
+                 // New approach: Iterate properties, find the one whose objectType matches the potential child type.
+                 // This still requires knowing the child type somehow.
+
+                 // Let's stick to the simplest convention for now:
+                 // The variable name holding the augmented value in the parent binding *must match* the TS property name.
+                 // e.g. SELECT ... ?hobbies WHERE { ... OPTIONAL { ?person ont:hasHobby ?hobbyUri } }
+                 // And the executor attaches results to `hobbies` based on `parentLinkVar: 'hobbyUri'` mapping to `tsPropertyName: 'hobbies'`.
+                 // This requires coordination between query, mapping, and executor.
+
+                 // If the variable name *is* the TS property name:
+                 if (variableName === tsPropName && propMap.isObjectProperty) {
+                    return { tsPropertyName: tsPropName, propMapping: propMap };
+                 }
+
+            }
+        }
+        // If no mapping found for this variable
+        return { tsPropertyName: null, propMapping: null };
+    };
+
+
+    // Recursive helper to parse bindings for a given type
+    const parseBindings = (
+        bindings: AugmentedSparqlBinding[],
+        typeName: string,
+        subjectVar: string
+    ): Map<string, any> => {
+        const currentLevelMap = new Map<string, any>();
+        const classMapping = mappingConfig[typeName];
+        if (!classMapping) {
+            console.warn(`No mapping found for type: ${typeName} during parsing.`);
+            return currentLevelMap;
+        }
+
+        for (const binding of bindings) {
+            const subjectValue = binding[subjectVar];
+            if (!subjectValue || subjectValue.type !== 'uri') continue; // Need URI subject
+            const subjectUri = subjectValue.value;
+
+            let currentObject = currentLevelMap.get(subjectUri);
+            if (!currentObject) {
+                currentObject = { id: subjectUri }; // Use 'id' as standard internal key? Or match mapping? Let's use mapping.
+                // Find the TS property mapped to '@id' or default to 'id'/'uri'
+                let idPropName = subjectVar; // Default to subjectVar if no @id mapping
+                for(const tsProp in classMapping.properties) {
+                    if (classMapping.properties[tsProp].uri === '@id') {
+                        idPropName = tsProp;
+                        break;
+                    }
+                }
+                currentObject = { [idPropName]: subjectUri };
+                currentLevelMap.set(subjectUri, currentObject);
+            }
+
+            // Process each variable in the binding
+            for (const variableName in binding) {
+                if (variableName === subjectVar) continue; // Skip subject variable itself
+
+                const value = binding[variableName];
+                if (!value) continue; // Skip undefined values
+
+                // Find corresponding TS property and mapping
+                // Use the current type's mapping
+                const { tsPropertyName, propMapping } = findMappingForVariable(variableName, classMapping);
+
+                if (tsPropertyName && propMapping) {
+                    // --- Handle Augmented/Nested Results ---
+                    if (isAugmentedBindingValue(value) && propMapping.isObjectProperty && propMapping.objectType) {
+                        const childTypeName = propMapping.objectType;
+                        const childClassMapping = mappingConfig[childTypeName];
+                        if (!childClassMapping) {
+                             console.warn(`Nested object type "${childTypeName}" (for property "${tsPropertyName}") not found in mapping config.`);
+                             continue;
+                        }
+                        // Infer child subject variable by convention (lowercase type name)
+                        let childSubjectVar = childTypeName.toLowerCase();
+                        // Check if child mapping explicitly defines '@id'
+                         for(const childTsProp in childClassMapping.properties) {
+                            if (childClassMapping.properties[childTsProp].uri === '@id') {
+                                childSubjectVar = childTsProp; // Use the mapped ID property name
+                                break;
+                            }
+                        }
+
+                        // Recursively parse the nested bindings
+                        // Add non-null assertion based on isAugmentedBindingValue check
+                        const nestedObjectsMap = parseBindings(value.results!.bindings, childTypeName, childSubjectVar);
+                        const nestedObjects = Array.from(nestedObjectsMap.values());
+
+                        if (propMapping.isArray) {
+                            if (!currentObject[tsPropertyName]) {
+                                currentObject[tsPropertyName] = [];
+                            }
+                            // Add unique nested objects
+                            const existingIds = new Set(currentObject[tsPropertyName].map((obj: any) => obj[childSubjectVar])); // Use child's ID prop
+                            nestedObjects.forEach(nestedObj => {
+                                if (!existingIds.has(nestedObj[childSubjectVar])) {
+                                    currentObject[tsPropertyName].push(nestedObj);
+                                    existingIds.add(nestedObj[childSubjectVar]);
+                                }
+                            });
+                        } else {
+                            // Assign first nested object if property is not array and not already set
+                            if (nestedObjects.length > 0 && currentObject[tsPropertyName] === undefined) {
+                                currentObject[tsPropertyName] = nestedObjects[0];
+                            } else if (nestedObjects.length > 1) {
+                                 console.warn(`Multiple nested objects found for non-array property "${tsPropertyName}" of ${subjectUri}. Assigning the first one.`);
+                                 if (currentObject[tsPropertyName] === undefined) {
+                                     currentObject[tsPropertyName] = nestedObjects[0];
+                                 }
+                            }
+                        }
+                    }
+                    // --- Handle Standard Literal/URI Values ---
+                    else if (!isAugmentedBindingValue(value)) { // Process only non-augmented values here
+                        const convertedValue = convertSparqlValue(value, propMapping);
+
+                        // Assign value, handling arrays
+                        if (propMapping.isArray) {
+                            if (!currentObject[tsPropertyName]) {
+                                currentObject[tsPropertyName] = [];
+                            }
+                            // Avoid duplicates for literals/URIs in arrays
+                            if (!currentObject[tsPropertyName].includes(convertedValue)) {
+                                currentObject[tsPropertyName].push(convertedValue);
+                            }
+                        } else {
+                            // Assign if not already set (first binding wins for non-arrays)
+                            if (currentObject[tsPropertyName] === undefined) {
+                                currentObject[tsPropertyName] = convertedValue;
+                            }
+                        }
+                    }
+                } else if (variableName === '_rdfType' && value.type === 'uri') {
+                    // Handle rdf:type specially if not explicitly mapped
+                    if (currentObject._rdfType === undefined) { // Assign only once
+                         currentObject._rdfType = value.value;
+                    }
+                }
+                // else {
+                //     console.warn(`No mapping found for variable "${variableName}" in type "${typeName}". Skipping.`);
+                // }
+            }
+        }
+        return currentLevelMap;
+    };
+
+    // Start parsing from the root level
+    const rootObjectsMap = parseBindings(augmentedResults.results.bindings, rootTypeName, rootSubjectVar);
+
+    return Array.from(rootObjectsMap.values());
+}
+
+
+export {
+    resultsToObject,
+    fetchAndReconstruct,
+    parseAugmentedResultsGeneric, // Export the new function
+    // Also export types used by the functions
+    SparqlBinding,
+    ReconstructionResult,
+    SparqlQueryExecutor
+};

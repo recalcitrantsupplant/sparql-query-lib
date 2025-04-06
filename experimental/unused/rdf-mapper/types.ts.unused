@@ -1,0 +1,31 @@
+// Generic types for the RDF mapping configuration
+
+/**
+ * Defines how a single property in a TypeScript object maps to an RDF predicate.
+ */
+export interface PropertyMapping {
+  uri: string; // The RDF predicate URI (or '@id' for the subject URI)
+  isObjectProperty?: boolean; // True if this property links to another resource/object
+  isArray?: boolean; // True if this property can have multiple values
+  objectType?: string; // If isObjectProperty is true, specifies the key (e.g., 'Address', 'Hobby') in the MappingConfiguration for the nested object's type. Required for nested objects.
+  datatype?: string; // Optional XSD datatype URI for literals (e.g., 'http://www.w3.org/2001/XMLSchema#integer')
+}
+
+/**
+ * Defines how a TypeScript class/interface maps to an RDF class and its properties.
+ */
+export interface ClassMapping {
+  classUri: string; // The RDF class URI (e.g., 'http://example.org/ontology#Person')
+  properties: {
+    // Key: TypeScript property name (e.g., 'firstName')
+    [tsPropertyName: string]: PropertyMapping;
+  };
+}
+
+/**
+ * The overall mapping configuration, mapping TypeScript type names to their ClassMapping.
+ */
+export interface MappingConfiguration {
+  // Key: TypeScript type name (e.g., 'Person')
+  [typeName: string]: ClassMapping;
+}

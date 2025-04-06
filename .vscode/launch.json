@@ -13,6 +13,18 @@
       "restart": true,
       "program": "dist/index.js",
       "preLaunchTask": "build"
+    },
+    {
+      "name": "Docker: Run SPARQL Query Lib",
+      "type": "docker",
+      "request": "launch",
+      "preLaunchTask": "docker-run: debug",
+      "platform": "node",
+      "dockerServerReadyAction": {
+        "pattern": "listening on port ([0-9]+)",
+        "uriFormat": "http://localhost:%s",
+        "action": "openExternally"
+      }
     }
   ]
 }

@@ -1,0 +1,345 @@
+<https://sparql-query-lib/QueryGroup> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/QueryGroup> <http://www.w3.org/2000/01/rdf-schema#label> "QueryGroup" .
+<https://sparql-query-lib/QueryGroup> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/QueryNode> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/QueryNode> <http://www.w3.org/2000/01/rdf-schema#label> "QueryNode" .
+<https://sparql-query-lib/QueryNode> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/QueryEdge> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/QueryEdge> <http://www.w3.org/2000/01/rdf-schema#label> "QueryEdge" .
+<https://sparql-query-lib/QueryEdge> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/ParameterMapping> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/ParameterMapping> <http://www.w3.org/2000/01/rdf-schema#label> "ParameterMapping" .
+<https://sparql-query-lib/ParameterMapping> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/SparqlBindingValue> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/SparqlBindingValue> <http://www.w3.org/2000/01/rdf-schema#label> "SparqlBindingValue" .
+<https://sparql-query-lib/SparqlBindingValue> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/QueryBindings> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/QueryBindings> <http://www.w3.org/2000/01/rdf-schema#label> "QueryBindings" .
+<https://sparql-query-lib/QueryBindings> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/Head> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/Head> <http://www.w3.org/2000/01/rdf-schema#label> "Head" .
+<https://sparql-query-lib/Head> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/Arguments> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/Arguments> <http://www.w3.org/2000/01/rdf-schema#label> "Arguments" .
+<https://sparql-query-lib/Arguments> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/Backend> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/Backend> <http://www.w3.org/2000/01/rdf-schema#label> "Backend" .
+<https://sparql-query-lib/Backend> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/BackendState> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/BackendState> <http://www.w3.org/2000/01/rdf-schema#label> "BackendState" .
+<https://sparql-query-lib/BackendState> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/StoredQuery> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/StoredQuery> <http://www.w3.org/2000/01/rdf-schema#label> "StoredQuery" .
+<https://sparql-query-lib/StoredQuery> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/Library> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/Library> <http://www.w3.org/2000/01/rdf-schema#label> "Library" .
+<https://sparql-query-lib/Library> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/QueryParameterGroup> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/QueryParameterGroup> <http://www.w3.org/2000/01/rdf-schema#label> "QueryParameterGroup" .
+<https://sparql-query-lib/QueryParameterGroup> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/QueryParameter> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/QueryParameter> <http://www.w3.org/2000/01/rdf-schema#label> "QueryParameter" .
+<https://sparql-query-lib/QueryParameter> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/NodeParameterMapping> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<https://sparql-query-lib/NodeParameterMapping> <http://www.w3.org/2000/01/rdf-schema#label> "NodeParameterMapping" .
+<https://sparql-query-lib/NodeParameterMapping> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/name> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/name> <http://www.w3.org/2000/01/rdf-schema#label> "name" .
+<https://sparql-query-lib/name> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<https://sparql-query-lib/name> <http://schema.org/domainIncludes> <https://sparql-query-lib/Backend> .
+<https://sparql-query-lib/name> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/name> <http://schema.org/domainIncludes> <https://sparql-query-lib/Library> .
+<https://sparql-query-lib/name> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/description> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/description> <http://www.w3.org/2000/01/rdf-schema#label> "description" .
+<https://sparql-query-lib/description> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<https://sparql-query-lib/description> <http://schema.org/domainIncludes> <https://sparql-query-lib/Backend> .
+<https://sparql-query-lib/description> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/description> <http://schema.org/domainIncludes> <https://sparql-query-lib/Library> .
+<https://sparql-query-lib/description> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/nodes> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/nodes> <http://www.w3.org/2000/01/rdf-schema#label> "nodes" .
+<https://sparql-query-lib/nodes> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<https://sparql-query-lib/nodes> <http://schema.org/rangeIncludes> <https://sparql-query-lib/QueryNode> .
+
+<https://sparql-query-lib/edges> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/edges> <http://www.w3.org/2000/01/rdf-schema#label> "edges" .
+<https://sparql-query-lib/edges> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<https://sparql-query-lib/edges> <http://schema.org/rangeIncludes> <https://sparql-query-lib/QueryEdge> .
+
+<https://sparql-query-lib/startNodeIds> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/startNodeIds> <http://www.w3.org/2000/01/rdf-schema#label> "startNodeIds" .
+<https://sparql-query-lib/startNodeIds> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<https://sparql-query-lib/startNodeIds> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/endNodeIds> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/endNodeIds> <http://www.w3.org/2000/01/rdf-schema#label> "endNodeIds" .
+<https://sparql-query-lib/endNodeIds> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<https://sparql-query-lib/endNodeIds> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/queryId> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/queryId> <http://www.w3.org/2000/01/rdf-schema#label> "queryId" .
+<https://sparql-query-lib/queryId> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryNode> .
+<https://sparql-query-lib/queryId> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/parameters> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/parameters> <http://www.w3.org/2000/01/rdf-schema#label> "parameters" .
+<https://sparql-query-lib/parameters> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/parameters> <http://schema.org/rangeIncludes> <https://sparql-query-lib/QueryParameterGroup> .
+
+<https://sparql-query-lib/backendId> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/backendId> <http://www.w3.org/2000/01/rdf-schema#label> "backendId" .
+<https://sparql-query-lib/backendId> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryNode> .
+<https://sparql-query-lib/backendId> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/fromNodeId> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/fromNodeId> <http://www.w3.org/2000/01/rdf-schema#label> "fromNodeId" .
+<https://sparql-query-lib/fromNodeId> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryEdge> .
+<https://sparql-query-lib/fromNodeId> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/toNodeId> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/toNodeId> <http://www.w3.org/2000/01/rdf-schema#label> "toNodeId" .
+<https://sparql-query-lib/toNodeId> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryEdge> .
+<https://sparql-query-lib/toNodeId> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/mappings> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/mappings> <http://www.w3.org/2000/01/rdf-schema#label> "mappings" .
+<https://sparql-query-lib/mappings> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryEdge> .
+<https://sparql-query-lib/mappings> <http://schema.org/rangeIncludes> <https://sparql-query-lib/ParameterMapping> .
+
+<https://sparql-query-lib/fromParam> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/fromParam> <http://www.w3.org/2000/01/rdf-schema#label> "fromParam" .
+<https://sparql-query-lib/fromParam> <http://schema.org/domainIncludes> <https://sparql-query-lib/ParameterMapping> .
+<https://sparql-query-lib/fromParam> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/toParam> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/toParam> <http://www.w3.org/2000/01/rdf-schema#label> "toParam" .
+<https://sparql-query-lib/toParam> <http://schema.org/domainIncludes> <https://sparql-query-lib/ParameterMapping> .
+<https://sparql-query-lib/toParam> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/bindingType> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/bindingType> <http://www.w3.org/2000/01/rdf-schema#label> "bindingType" .
+<https://sparql-query-lib/bindingType> <http://schema.org/domainIncludes> <https://sparql-query-lib/SparqlBindingValue> .
+<https://sparql-query-lib/bindingType> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/value> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/value> <http://www.w3.org/2000/01/rdf-schema#label> "value" .
+<https://sparql-query-lib/value> <http://schema.org/domainIncludes> <https://sparql-query-lib/SparqlBindingValue> .
+<https://sparql-query-lib/value> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/datatype> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/datatype> <http://www.w3.org/2000/01/rdf-schema#label> "datatype" .
+<https://sparql-query-lib/datatype> <http://schema.org/domainIncludes> <https://sparql-query-lib/SparqlBindingValue> .
+<https://sparql-query-lib/datatype> <http://schema.org/rangeIncludes> <http://schema.org/URL> .
+
+<https://sparql-query-lib/xmlLang> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/xmlLang> <http://www.w3.org/2000/01/rdf-schema#label> "xml:lang" .
+<https://sparql-query-lib/xmlLang> <http://schema.org/domainIncludes> <https://sparql-query-lib/SparqlBindingValue> .
+<https://sparql-query-lib/xmlLang> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/head> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/head> <http://www.w3.org/2000/01/rdf-schema#label> "head" .
+<https://sparql-query-lib/head> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryBindings> .
+<https://sparql-query-lib/head> <http://schema.org/rangeIncludes> <https://sparql-query-lib/Head> .
+
+<https://sparql-query-lib/arguments> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/arguments> <http://www.w3.org/2000/01/rdf-schema#label> "arguments" .
+<https://sparql-query-lib/arguments> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryBindings> .
+<https://sparql-query-lib/arguments> <http://schema.org/rangeIncludes> <https://sparql-query-lib/Arguments> .
+
+<https://sparql-query-lib/vars> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/vars> <http://www.w3.org/2000/01/rdf-schema#label> "vars" .
+<https://sparql-query-lib/vars> <http://schema.org/domainIncludes> <https://sparql-query-lib/Head> .
+<https://sparql-query-lib/vars> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryParameterGroup> .
+<https://sparql-query-lib/vars> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+<https://sparql-query-lib/vars> <http://schema.org/rangeIncludes> <https://sparql-query-lib/QueryParameter> .
+
+<https://sparql-query-lib/paramName> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/paramName> <http://www.w3.org/2000/01/rdf-schema#label> "paramName" .
+<https://sparql-query-lib/paramName> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryParameter> .
+<https://sparql-query-lib/paramName> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/allowedTypes> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/allowedTypes> <http://www.w3.org/2000/01/rdf-schema#label> "allowedTypes" .
+<https://sparql-query-lib/allowedTypes> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryParameter> .
+<https://sparql-query-lib/allowedTypes> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/bindings> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/bindings> <http://www.w3.org/2000/01/rdf-schema#label> "bindings" .
+<https://sparql-query-lib/bindings> <http://schema.org/domainIncludes> <https://sparql-query-lib/Arguments> .
+<https://sparql-query-lib/bindings> <http://schema.org/rangeIncludes> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/endpoint> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/endpoint> <http://www.w3.org/2000/01/rdf-schema#label> "endpoint" .
+<https://sparql-query-lib/endpoint> <http://schema.org/domainIncludes> <https://sparql-query-lib/Backend> .
+<https://sparql-query-lib/endpoint> <http://schema.org/rangeIncludes> <http://schema.org/URL> .
+
+<https://sparql-query-lib/username> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/username> <http://www.w3.org/2000/01/rdf-schema#label> "username" .
+<https://sparql-query-lib/username> <http://schema.org/domainIncludes> <https://sparql-query-lib/Backend> .
+<https://sparql-query-lib/username> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/password> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/password> <http://www.w3.org/2000/01/rdf-schema#label> "password" .
+<https://sparql-query-lib/password> <http://schema.org/domainIncludes> <https://sparql-query-lib/Backend> .
+<https://sparql-query-lib/password> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/backendType> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/backendType> <http://www.w3.org/2000/01/rdf-schema#label> "backendType" .
+<https://sparql-query-lib/backendType> <http://schema.org/domainIncludes> <https://sparql-query-lib/Backend> .
+<https://sparql-query-lib/backendType> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/currentBackend> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/currentBackend> <http://www.w3.org/2000/01/rdf-schema#label> "currentBackend" .
+<https://sparql-query-lib/currentBackend> <http://schema.org/domainIncludes> <https://sparql-query-lib/BackendState> .
+<https://sparql-query-lib/currentBackend> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/backends> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/backends> <http://www.w3.org/2000/01/rdf-schema#label> "backends" .
+<https://sparql-query-lib/backends> <http://schema.org/domainIncludes> <https://sparql-query-lib/BackendState> .
+<https://sparql-query-lib/backends> <http://schema.org/rangeIncludes> <https://sparql-query-lib/Backend> .
+
+<https://sparql-query-lib/query> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/query> <http://www.w3.org/2000/01/rdf-schema#label> "query" .
+<https://sparql-query-lib/query> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/query> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<http://schema.org/dateCreated> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<http://schema.org/dateCreated> <http://www.w3.org/2000/01/rdf-schema#label> "dateCreated" .
+<http://schema.org/dateCreated> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<http://schema.org/dateCreated> <http://schema.org/domainIncludes> <https://sparql-query-lib/Library> .
+<http://schema.org/dateCreated> <http://schema.org/domainIncludes> <https://sparql-query-lib/Backend> .
+<http://schema.org/dateCreated> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<http://schema.org/dateCreated> <http://schema.org/rangeIncludes> <http://schema.org/DateTime> .
+
+<http://schema.org/dateModified> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<http://schema.org/dateModified> <http://www.w3.org/2000/01/rdf-schema#label> "dateModified" .
+<http://schema.org/dateModified> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<http://schema.org/dateModified> <http://schema.org/domainIncludes> <https://sparql-query-lib/Library> .
+<http://schema.org/dateModified> <http://schema.org/domainIncludes> <https://sparql-query-lib/Backend> .
+<http://schema.org/dateModified> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<http://schema.org/dateModified> <http://schema.org/rangeIncludes> <http://schema.org/DateTime> .
+
+<https://sparql-query-lib/variables> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/variables> <http://www.w3.org/2000/01/rdf-schema#label> "variables" .
+<https://sparql-query-lib/variables> <http://schema.org/rangeIncludes> <http://schema.org/Thing> .
+
+<https://sparql-query-lib/outputVars> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/outputVars> <http://www.w3.org/2000/01/rdf-schema#label> "outputVars" .
+<https://sparql-query-lib/outputVars> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/outputVars> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/parameterName> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/parameterName> <http://www.w3.org/2000/01/rdf-schema#label> "parameterName" .
+<https://sparql-query-lib/parameterName> <http://schema.org/domainIncludes> <https://sparql-query-lib/NodeParameterMapping> .
+<https://sparql-query-lib/parameterName> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/parameterValue> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/parameterValue> <http://www.w3.org/2000/01/rdf-schema#label> "parameterValue" .
+<https://sparql-query-lib/parameterValue> <http://schema.org/domainIncludes> <https://sparql-query-lib/NodeParameterMapping> .
+<https://sparql-query-lib/parameterValue> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/parameterMappings> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/parameterMappings> <http://www.w3.org/2000/01/rdf-schema#label> "parameterMappings" .
+<https://sparql-query-lib/parameterMappings> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryNode> .
+<https://sparql-query-lib/parameterMappings> <http://schema.org/rangeIncludes> <https://sparql-query-lib/NodeParameterMapping> .
+
+<http://schema.org/DataType> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/DataType> <http://www.w3.org/2000/01/rdf-schema#label> "DataType" .
+
+<http://schema.org/Text> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/Text> <http://www.w3.org/2000/01/rdf-schema#label> "Text" .
+<http://schema.org/Text> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/DataType> .
+
+<http://schema.org/Boolean> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/Boolean> <http://www.w3.org/2000/01/rdf-schema#label> "Boolean" .
+<http://schema.org/Boolean> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/DataType> .
+
+<http://schema.org/Number> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/Number> <http://www.w3.org/2000/01/rdf-schema#label> "Number" .
+<http://schema.org/Number> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/DataType> .
+
+<http://schema.org/Integer> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/Integer> <http://www.w3.org/2000/01/rdf-schema#label> "Integer" .
+<http://schema.org/Integer> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Number> .
+
+<http://schema.org/Float> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/Float> <http://www.w3.org/2000/01/rdf-schema#label> "Float" .
+<http://schema.org/Float> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Number> .
+
+<http://schema.org/URL> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/URL> <http://www.w3.org/2000/01/rdf-schema#label> "URL" .
+<http://schema.org/URL> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/Text> .
+
+<http://schema.org/DateTime> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/DateTime> <http://www.w3.org/2000/01/rdf-schema#label> "DateTime" .
+<http://schema.org/DateTime> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <http://schema.org/DataType> .
+
+<http://schema.org/Thing> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Class> .
+<http://schema.org/Thing> <http://www.w3.org/2000/01/rdf-schema#label> "Thing" .
+
+<http://schema.org/name> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<http://schema.org/name> <http://www.w3.org/2000/01/rdf-schema#label> "name" .
+<http://schema.org/name> <http://schema.org/domainIncludes> <http://schema.org/Thing> .
+<http://schema.org/name> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<http://schema.org/identifier> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<http://schema.org/identifier> <http://www.w3.org/2000/01/rdf-schema#label> "identifier" .
+<http://schema.org/identifier> <http://schema.org/domainIncludes> <http://schema.org/Thing> .
+<http://schema.org/identifier> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+<http://schema.org/identifier> <http://schema.org/rangeIncludes> <http://schema.org/URL> .
+
+<http://schema.org/description> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<http://schema.org/description> <http://www.w3.org/2000/01/rdf-schema#label> "description" .
+<http://schema.org/description> <http://schema.org/domainIncludes> <http://schema.org/Thing> .
+<http://schema.org/description> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<http://schema.org/url> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<http://schema.org/url> <http://www.w3.org/2000/01/rdf-schema#label> "url" .
+<http://schema.org/url> <http://schema.org/domainIncludes> <http://schema.org/Thing> .
+<http://schema.org/url> <http://schema.org/rangeIncludes> <http://schema.org/URL> .
+
+<http://schema.org/isPartOf> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<http://schema.org/isPartOf> <http://www.w3.org/2000/01/rdf-schema#label> "isPartOf" .
+<http://schema.org/isPartOf> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<http://schema.org/isPartOf> <http://schema.org/domainIncludes> <https://sparql-query-lib/QueryGroup> .
+<http://schema.org/isPartOf> <http://schema.org/rangeIncludes> <https://sparql-query-lib/Library> .
+<http://schema.org/isPartOf> <http://schema.org/rangeIncludes> <https://sparql-query-lib/QueryGroup> .
+
+<https://sparql-query-lib/queryType> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/queryType> <http://www.w3.org/2000/01/rdf-schema#label> "queryType" .
+<https://sparql-query-lib/queryType> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/queryType> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/defaultBackend> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/defaultBackend> <http://www.w3.org/2000/01/rdf-schema#label> "defaultBackend" .
+<https://sparql-query-lib/defaultBackend> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/defaultBackend> <http://schema.org/domainIncludes> <https://sparql-query-lib/Library> .
+<https://sparql-query-lib/defaultBackend> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/hasLimitParameter> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/hasLimitParameter> <http://www.w3.org/2000/01/rdf-schema#label> "hasLimitParameter" .
+<https://sparql-query-lib/hasLimitParameter> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/hasLimitParameter> <http://schema.org/rangeIncludes> <http://schema.org/Text> .
+
+<https://sparql-query-lib/hasOffsetParameter> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .
+<https://sparql-query-lib/hasOffsetParameter> <http://www.w3.org/2000/01/rdf-schema#label> "hasOffsetParameter" .
+<https://sparql-query-lib/hasOffsetParameter> <http://schema.org/domainIncludes> <https://sparql-query-lib/StoredQuery> .
+<https://sparql-query-lib/hasOffsetParameter> <http://schema.org/rangeIncludes> <http://schema.org/Text> .

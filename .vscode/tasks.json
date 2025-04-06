@@ -10,6 +10,36 @@
         "isDefault": true
       },
       "problemMatcher": "$tsc"
+    },
+    {
+      "type": "docker-build",
+      "label": "docker-build",
+      "platform": "node",
+      "dockerBuild": {
+        "dockerfile": "${workspaceFolder}/Dockerfile",
+        "context": "${workspaceFolder}",
+        "pull": true
+      }
+    },
+    {
+      "type": "docker-run",
+      "label": "docker-run: debug",
+      "dependsOn": [
+        "docker-build"
+      ],
+      "platform": "node",
+      "dockerRun": {
+        "image": "sparql-query-lib:latest",
+        "ports": [
+          { "hostPort": 3050, "containerPort": 3000 }
+        ],
+        "env": {
+          "LIBRARY_STORAGE_SPARQL_ENDPOINT": "https://fuseki.dev.kurrawong.ai/s32_queries",
+          "LIBRARY_STORAGE_SPARQL_UPDATE_ENDPOINT": "https://fuseki.dev.kurrawong.ai/s32_queries",
+          "LIBRARY_STORAGE_SPARQL_USERNAME": "kai",
+          "LIBRARY_STORAGE_SPARQL_PASSWORD": "kai"
+        }
+      }
     }
   ]
 }

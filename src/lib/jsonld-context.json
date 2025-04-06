@@ -1,0 +1,52 @@
+{
+  "@context": {
+    "@vocab": "https://sparql-query-lib/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "schema": "http://schema.org/",
+
+
+    "backends": { "@container": "@set" },
+    "variableMappings": { "@id": "variables", "@container": "@set" },
+    "outputs": { "@container": "@set" },
+    "queries": { "@container": "@set" },
+    "nodes": { "@container": "@set" },
+    "edges": { "@container": "@set" },
+    "startNodeIds": { "@container": "@set" },
+    "endNodeIds": { "@container": "@set" },
+    "mappings": { "@container": "@set" },
+    "bindings": { "@container": "@set" },
+    "vars": { "@container": "@set" },
+    "defaultGraphUri": { "@container": "@set" },
+    "namedGraphUri": { "@container": "@set" },
+    "restrictionType": { "@container": "@set" },
+    "language": { "@container": "@set" },
+    "direction": { "@container": "@set" },
+    "outputVars": { "@container": "@set" },
+    "parameters": { "@container": "@set" },
+    "hasLimitParameter": { "@container": "@set" },
+    "hasOffsetParameter": { "@container": "@set" },
+
+    "datatype": { "@type": "@id", "@container": "@set" },
+    "http://schema.org/dateCreated": { "@type": "xsd:dateTime" },
+    "http://schema.org/dateModified": { "@type": "xsd:dateTime" },
+    "http://schema.org/isPartOf": { "@container": "@set" },
+    "timeout": { "@type": "xsd:integer" },
+    "value": "rdf:value",
+    "bindingType": "bindingType",
+
+    "VariableMapping": "VariableMapping",
+    "variableName": "variableName",
+    "restrictions": "restrictions",
+
+    "NodeParameterMapping": "NodeParameterMapping",
+    "parameterName": "parameterName",
+    "parameterValue": "parameterValue",
+
+    "parameterMappings": { "@id": "parameterMappings", "@container": "@set" },
+
+    "QueryParameter": "QueryParameter",
+    "paramName": "paramName",
+    "allowedTypes": { "@id": "allowedTypes", "@container": "@set" }
+  }
+}

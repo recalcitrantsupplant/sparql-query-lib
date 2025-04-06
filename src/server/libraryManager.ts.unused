@@ -1,0 +1,110 @@
+import { randomUUID } from 'crypto';
+// Import types from the generated schema-dts file
+// Removed VariableGroup as it was defined in the manual types file
+import type { Library, StoredQuery } from '../types/schema-dts';
+// Removed ILibraryStorage import as the file is deleted
+// import { ILibraryStorage } from './libraryStorage';
+import { SparqlQueryParser } from '../lib/parser'; // Import the parser
+
+export class LibraryManager {
+    // TODO: Refactor LibraryManager to use EntityManager or another persistence strategy
+    // The dependency on ILibraryStorage has been removed.
+    // private storage: ILibraryStorage; // Removed storage dependency
+    private parser: SparqlQueryParser; // Add parser instance
+
+    constructor(/* storage: ILibraryStorage */) { // Removed storage dependency
+        // this.storage = storage;
+        this.parser = new SparqlQueryParser(); // Instantiate the parser
+        console.warn("LibraryManager needs refactoring after ILibraryStorage removal.");
+    }
+
+    /**
+    // Commenting out methods that depended on ILibraryStorage
+    /*
+    async initialize(): Promise<void> {
+        // try {
+        //     await this.storage.getAllLibraries(); // Example: Trigger initial load/check
+        //     console.log('LibraryManager initialized. Storage connection verified.');
+        // } catch (error) {
+        //     console.error('Failed to initialize LibraryManager or connect to storage:', error);
+        //     throw new Error(`Failed to initialize LibraryManager: ${error instanceof Error ? error.message : error}`);
+        // }
+        console.warn("LibraryManager.initialize() needs refactoring.");
+        return Promise.resolve();
+    }
+
+    async createLibrary(name: string, description?: string): Promise<Library> {
+        // const libraryData = {
+        //     name,
+        //     description,
+        //     '@type': 'Library' as const // Add type literal
+        // };
+        // return this.storage.addLibrary(libraryData);
+        console.warn("LibraryManager.createLibrary() needs refactoring.");
+        throw new Error("LibraryManager.createLibrary() not implemented after storage removal.");
+    }
+
+    async getLibraries(): Promise<Library[]> {
+        // return this.storage.getAllLibraries();
+        console.warn("LibraryManager.getLibraries() needs refactoring.");
+        return Promise.resolve([]);
+    }
+
+    async getLibraryById(iri: string): Promise<Library | null> {
+        // return this.storage.getLibraryByIRI(iri);
+        console.warn("LibraryManager.getLibraryById() needs refactoring.");
+        return Promise.resolve(null);
+    }
+
+    async updateLibrary(iri: string, data: Partial<Omit<Library, '@id' | 'queries'>>): Promise<Library | null> {
+        // return this.storage.updateLibrary(iri, data);
+        console.warn("LibraryManager.updateLibrary() needs refactoring.");
+        return Promise.resolve(null);
+    }
+
+    async addQueryToLibrary(libraryIRI: string, queryData: Omit<StoredQuery, '@id' | 'createdAt' | 'updatedAt' | 'variableMappings' | 'outputVarNames'>): Promise<StoredQuery> {
+        // let detectedOutputs: string[] = [];
+        // let queryString: string | undefined;
+        // // ... (parsing logic remains valid) ...
+        // const fullQueryData: Omit<StoredQuery, '@id' | 'createdAt' | 'updatedAt'> = {
+        //     ...queryData,
+        //     outputVarNames: detectedOutputs
+        // };
+        // return this.storage.addQuery(libraryIRI, fullQueryData);
+         console.warn("LibraryManager.addQueryToLibrary() needs refactoring.");
+         throw new Error("LibraryManager.addQueryToLibrary() not implemented after storage removal.");
+    }
+
+    async updateQuery(queryIRI: string, updatedQueryData: Partial<Omit<StoredQuery, '@id' | 'libraryId' | 'createdAt' | 'updatedAt' | 'outputVarNames' | 'variableMappings'>>): Promise<StoredQuery | null> {
+        // const dataToUpdate: Partial<StoredQuery> = { ...updatedQueryData };
+        // // ... (parsing logic remains valid) ...
+        // return this.storage.updateQuery(queryIRI, dataToUpdate);
+        console.warn("LibraryManager.updateQuery() needs refactoring.");
+        return Promise.resolve(null);
+    }
+
+    async removeQuery(queryIRI: string): Promise<boolean> {
+        // return this.storage.deleteQuery(queryIRI);
+        console.warn("LibraryManager.removeQuery() needs refactoring.");
+        return Promise.resolve(false);
+    }
+
+    async getQueriesByLibrary(libraryIRI: string): Promise<StoredQuery[]> {
+        // return this.storage.getQueriesByLibraryIRI(libraryIRI);
+        console.warn("LibraryManager.getQueriesByLibrary() needs refactoring.");
+        return Promise.resolve([]);
+    }
+
+    async getQueryById(queryIRI: string): Promise<StoredQuery | null> {
+        // return this.storage.getQueryByIRI(queryIRI);
+        console.warn("LibraryManager.getQueryById() needs refactoring.");
+        return Promise.resolve(null);
+    }
+
+    async deleteLibrary(iri: string): Promise<boolean> {
+        // return this.storage.deleteLibrary(iri);
+        console.warn("LibraryManager.deleteLibrary() needs refactoring.");
+        return Promise.resolve(false);
+    }
+    */
+}

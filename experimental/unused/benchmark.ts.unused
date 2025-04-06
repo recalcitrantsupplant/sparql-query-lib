@@ -1,0 +1,414 @@
+import oxigraph, { Store } from 'oxigraph';
+import type { Quad } from '@rdfjs/types';
+import RdfDataFactory from '@rdfjs/data-model';
+import crypto from 'crypto';
+import { performance } from 'perf_hooks'; // For more precise timing
+
+// --- Import necessary components from both solutions ---
+
+// From rdf-mapper (used by both)
+import { objectToQuads } from './rdf-mapper/object-to-rdf';
+import { fetchAndReconstruct } from './rdf-mapper/rdf-to-object';
+import mapping from './example/mapping'; // Use the example mapping for consistency
+
+// From chained-select
+import { executeChainedQuery } from './chained-select/executor';
+import { QueryConfig, SparqlExecutor as ChainedSparqlExecutor, AugmentedSparqlResults, SparqlResults, SparqlBinding, SparqlBindingValue, AugmentedSparqlBindingValue } from './chained-select/types';
+import { termToSparqlBindingValue as chainedTermToBinding } from './chained-select/test'; // Reuse term converter from test
+
+// From example
+import { createOxigraphExecutor as createExampleExecutor } from './example/oxigraph-executor'; // Executor used by fetchAndReconstruct
+import type { Person, Address, Hobby } from './example/types'; // Use example types for data generation
+
+// --- Configuration ---
+const baseUri = 'http://benchmark.example.org/data/';
+const NUM_PERSONS = 1000; // Number of persons to generate (Reverted to 100)
+const MAX_HOBBIES_PER_PERSON = 5;
+const BENCHMARK_RUNS = 5; // Number of times to run each benchmark
+
+// --- Data Generation ---
+function generateData(count: number): { persons: Person[], personUris: string[] } {
+    const persons: Person[] = [];
+    const personUris: string[] = [];
+
+    for (let i = 0; i < count; i++) {
+        const personUuid = crypto.randomUUID();
+        const personUri = `${baseUri}person/${personUuid}`;
+        personUris.push(personUri);
+
+        const numHobbies = Math.floor(Math.random() * (MAX_HOBBIES_PER_PERSON + 1));
+        const hobbies: Hobby[] = [];
+        for (let j = 0; j < numHobbies; j++) {
+            const hobbyUuid = crypto.randomUUID();
+            hobbies.push({
+                uri: `${baseUri}hobby/${hobbyUuid}`, // Pre-assign URI for consistency
+                name: `Hobby-${i}-${j}`,
+                yearsPracticed: Math.floor(Math.random() * 20),
+                _rdfType: mapping.Hobby.classUri // Use classUri instead of rdfType
+            });
+        }
+
+        const addressUuid = crypto.randomUUID();
+        const address: Address = {
+            uri: `${baseUri}address/${addressUuid}`, // Pre-assign URI
+            street: `${i + 1} Benchmark St`,
+            city: `City ${i % 10}`,
+            postalCode: `${10000 + i}`,
+            country: 'Benchtopia',
+            _rdfType: mapping.Address.classUri // Use classUri instead of rdfType
+        };
+
+        const person: Person = {
+            uri: personUri, // Pre-assign URI
+            id: personUuid, // Keep separate ID if needed
+            firstName: `FirstName${i}`,
+            lastName: `LastName${i}`,
+            age: 20 + (i % 50),
+            currentAddress: address,
+            hobbies: hobbies,
+            _rdfType: mapping.Person.classUri // Use classUri instead of rdfType
+        };
+        persons.push(person);
+    }
+    return { persons, personUris };
+}
+
+// --- Common Setup & Write Benchmark ---
+async function setupAndLoadStore(persons: Person[]): Promise<{ store: Store, loadTimeMs: number }> {
+    const store = new Store();
+    let allQuads: Quad[] = [];
+
+    // Convert all persons (and nested objects) to quads
+    persons.forEach(person => {
+        try {
+            // Ensure objectToQuads uses the pre-assigned URIs
+            // Removed the 5th argument as it's not part of the function signature
+            const quads = objectToQuads(person, 'Person', mapping, baseUri);
+            allQuads = allQuads.concat(quads);
+        } catch (error) {
+            console.error(`Error converting person ${person.uri} to quads:`, error);
+            throw error; // Stop if conversion fails
+        }
+    });
+
+    // Deduplicate (optional, objectToQuads might handle some cases)
+    const uniqueQuads = [];
+    const quadSet = new Set<string>();
+    for (const quad of allQuads) {
+        const quadString = `${quad.subject.value} ${quad.predicate.value} ${quad.object.value} ${quad.graph.value}`;
+        if (!quadSet.has(quadString)) {
+            quadSet.add(quadString);
+            uniqueQuads.push(quad);
+        }
+    }
+    allQuads = uniqueQuads;
+
+    // Measure load time
+    const startTime = performance.now();
+    allQuads.forEach(quad => {
+        try {
+            // Add the quad directly without reconstruction
+            store.add(quad as any); // Keep 'as any' for now, just in case
+        } catch (e) {
+            console.error("Error adding quad:", JSON.stringify(quad), e);
+            throw e;
+        }
+    });
+    const endTime = performance.now();
+    const loadTimeMs = endTime - startTime;
+
+    console.log(`Loaded ${store.size} unique quads into the store.`);
+
+    return { store, loadTimeMs };
+}
+
+// --- Chained Select Executor (adapted from test) ---
+// Reverted temporary changes
+function createChainedExecutor(store: Store): ChainedSparqlExecutor {
+  const executeQuery: ChainedSparqlExecutor = async (query: string): Promise<SparqlResults> => {
+    try {
+      const resultsIterator = store.query(query);
+      const bindingsArray: SparqlBinding[] = [];
+      let variables: string[] = [];
+      type OxigraphBindingSet = Map<string, oxigraph.Term>;
+
+      const isAsyncIterable = (obj: any): obj is AsyncIterable<OxigraphBindingSet> =>
+          obj && typeof obj[Symbol.asyncIterator] === 'function';
+      const isSyncIterable = (obj: any): obj is Iterable<OxigraphBindingSet> =>
+          obj && typeof obj[Symbol.iterator] === 'function';
+
+      let isAskResult = false;
+      let askBooleanResult = false;
+
+      if (typeof resultsIterator === 'boolean') {
+          isAskResult = true;
+          askBooleanResult = resultsIterator;
+          variables = [];
+      } else if (isAsyncIterable(resultsIterator) || isSyncIterable(resultsIterator)) {
+          let firstBinding = true;
+          const processBindings = async (iterator: AsyncIterable<OxigraphBindingSet> | Iterable<OxigraphBindingSet>) => {
+              for await (const oxBindings of iterator) {
+                  const sparqlBinding: SparqlBinding = {};
+                  const currentVars: string[] = [];
+                  // Use the original term conversion
+                  for (const [variableName, term] of oxBindings.entries()) {
+                      if (typeof variableName === 'string') {
+                          sparqlBinding[variableName] = chainedTermToBinding(term); // Use imported converter
+                          currentVars.push(variableName);
+                      }
+                  }
+                  bindingsArray.push(sparqlBinding);
+                  if (firstBinding) {
+                      variables = currentVars.sort();
+                      firstBinding = false;
+                  }
+              }
+          };
+          if (isAsyncIterable(resultsIterator)) {
+              await processBindings(resultsIterator);
+          } else {
+              async function* asyncWrap(syncIterator: Iterable<OxigraphBindingSet>) {
+                  for (const item of syncIterator) { yield item; }
+              }
+              await processBindings(asyncWrap(resultsIterator));
+          }
+      } else {
+          console.warn("Oxigraph query returned unexpected type:", typeof resultsIterator);
+          variables = [];
+      }
+
+      const finalResult: SparqlResults = {
+        head: { vars: variables },
+        results: { bindings: bindingsArray },
+      };
+      if (isAskResult) {
+          finalResult.boolean = askBooleanResult;
+      }
+      return finalResult;
+    } catch (error) {
+      console.error('Error executing SPARQL query with Oxigraph (Chained Executor):', error);
+      console.error('Query:', query);
+      throw error;
+    }
+  };
+  return executeQuery;
+}
+
+// --- Parser for Benchmark's Augmented Results ---
+// Adapted from chained-select/test.ts but uses types from example/types.ts
+// Removed diagnostic logging
+function parseBenchmarkAugmentedResults(augmentedResults: AugmentedSparqlResults): Person[] {
+    const personsMap = new Map<string, Person>(); // Use Person type from example/types.ts
+
+    augmentedResults.results.bindings.forEach(binding => {
+        const personUri = binding['person']?.value;
+        if (!personUri || binding['person']?.type !== 'uri') return;
+
+        let person = personsMap.get(personUri);
+        if (!person) {
+            // Initialize with properties required by example/types.ts Person interface
+            person = {
+                uri: personUri,
+                id: personUri.substring(personUri.lastIndexOf('/') + 1), // Extract UUID as fallback ID
+                firstName: '', // Initialize required fields
+                lastName: '',
+                age: 0, // Initialize required fields
+                currentAddress: { uri: '', street: '', city: '', postalCode: '', country: '' }, // Initialize required fields
+                hobbies: [] // Initialize required fields
+            };
+            personsMap.set(personUri, person);
+        }
+
+        // Populate Person fields
+        if (binding['firstName']?.type === 'literal') person.firstName = binding['firstName'].value;
+        if (binding['lastName']?.type === 'literal') person.lastName = binding['lastName'].value;
+        if (binding['_rdfType']?.type === 'uri') person._rdfType = binding['_rdfType'].value; // Optional field
+        if (binding['age']?.type === 'literal' && binding['age'].datatype === 'http://www.w3.org/2001/XMLSchema#integer') {
+            person.age = parseInt(binding['age'].value, 10);
+        }
+        // Note: Address parsing from 'addressUri' is not implemented here yet, would need another chain/parser logic
+
+        // Check for augmented hobby data
+        const hobbyBinding = binding['hobbyUri'] as AugmentedSparqlBindingValue | undefined;
+        if (hobbyBinding?.results?.bindings) {
+            if (!person.hobbies) person.hobbies = []; // Should already be initialized, but safe check
+
+            const existingHobbyIds = new Set(person.hobbies.map(h => h.uri)); // Use uri from example/types Hobby
+
+            hobbyBinding.results.bindings.forEach(hobbyResultBinding => {
+                const hobbyUri = hobbyResultBinding['hobby']?.value;
+                const hobbyName = hobbyResultBinding['hobbyName']?.value;
+                const yearsPracticedVal = hobbyResultBinding['yearsPracticed']?.value; // Get yearsPracticed
+
+                if (hobbyUri && hobbyName && !existingHobbyIds.has(hobbyUri)) {
+                    // Use Hobby type from example/types.ts
+                    const hobby: Hobby = {
+                        uri: hobbyUri,
+                        name: hobbyName,
+                        yearsPracticed: yearsPracticedVal ? parseInt(yearsPracticedVal, 10) : 0, // Parse yearsPracticed
+                        _rdfType: hobbyResultBinding['_rdfType']?.value // Optional field
+                    };
+                    person.hobbies.push(hobby);
+                    existingHobbyIds.add(hobbyUri);
+                }
+            });
+        }
+    });
+
+    return Array.from(personsMap.values());
+}
+
+
+// --- Benchmark Functions ---
+
+async function benchmarkChainedSelect(store: Store): Promise<number> {
+    const sparqlExecutor = createChainedExecutor(store);
+
+    // Query config to fetch all persons and their hobbies
+    // Adjust predicates based on 'mapping.ts'
+    const queryConfig: QueryConfig = {
+        rootQuery: `
+          PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+          PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+          PREFIX ont: <http://example.org/ontology#> # Corrected prefix directly
+
+          SELECT ?person ?_rdfType ?firstName ?lastName ?age ?hobbyUri ?addressUri
+          WHERE {
+            ?person a ont:Person ;
+                    a ?_rdfType ;
+                    foaf:firstName ?firstName ;
+                    foaf:lastName ?lastName .
+            OPTIONAL { ?person foaf:age ?age . }
+            OPTIONAL { ?person ont:hasHobby ?hobbyUri . }
+            OPTIONAL { ?person ont:hasAddress ?addressUri . } # Assuming hasAddress predicate from mapping
+          }
+        `,
+        chain: [
+            { // Chain for Hobbies
+                parentLinkVar: 'hobbyUri',
+                childLinkVar: 'hobby',
+                childQuery: `
+                  PREFIX ont: <http://example.org/ontology#> # Corrected prefix directly
+                  PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+                  SELECT ?hobby ?_rdfType ?hobbyName ?yearsPracticed
+                  WHERE {
+                    # VALUES clause will be injected
+                    ?hobby a ont:Hobby ;
+                           a ?_rdfType ;
+                           ont:hobbyName ?hobbyName . # Predicate from mapping
+                    OPTIONAL { ?hobby ont:yearsPracticed ?yearsPracticed . } # Predicate from mapping
+                  }
+                `,
+            },
+            // Add chain for Address if needed, similar structure
+            // {
+            //     parentLinkVar: 'addressUri',
+            //     childLinkVar: 'address',
+            //     childQuery: `... query for address details ...`
+            // }
+        ]
+    };
+
+    const startTime = performance.now();
+    try {
+        const augmentedResults = await executeChainedQuery(queryConfig, sparqlExecutor);
+        // Also include parsing time as it's part of the effective read process
+        const nestedObjects = parseBenchmarkAugmentedResults(augmentedResults); // Use the local parser
+        const endTime = performance.now();
+        console.log(`Chained Select: Fetched and parsed ${nestedObjects.length} persons.`);
+        return endTime - startTime;
+    } catch (error) {
+        console.error("Error during Chained Select benchmark:", error);
+        return -1; // Indicate error
+    }
+}
+
+async function benchmarkFetchReconstruct(store: Store, personUris: string[]): Promise<number> {
+    const sparqlExecutor = createExampleExecutor(store); // Use the executor compatible with fetchAndReconstruct
+
+    const startTime = performance.now();
+    try {
+        // Fetch all persons using their URIs
+        const reconstructedPersons = await fetchAndReconstruct<Person>(
+            personUris,
+            'Person',
+            mapping,
+            sparqlExecutor
+            // Increase depth if necessary, default might be sufficient based on mapping
+            // { maxDepth: 3 }
+        );
+        const endTime = performance.now();
+        console.log(`Fetch/Reconstruct: Fetched and reconstructed ${reconstructedPersons.length} persons.`);
+        return endTime - startTime;
+    } catch (error) {
+        console.error("Error during Fetch/Reconstruct benchmark:", error);
+        return -1; // Indicate error
+    }
+}
+
+// --- Main Execution ---
+async function runBenchmarks() {
+    console.log(`--- Starting Benchmark (Persons: ${NUM_PERSONS}, Runs: ${BENCHMARK_RUNS}) ---`);
+
+    const results = {
+        loadTimes: [] as number[],
+        chainedReadTimes: [] as number[],
+        reconstructReadTimes: [] as number[],
+    };
+
+    for (let i = 0; i < BENCHMARK_RUNS; i++) {
+        console.log(`\n--- Run ${i + 1} / ${BENCHMARK_RUNS} ---`);
+
+        // 1. Generate Data
+        console.log("Generating data...");
+        const { persons, personUris } = generateData(NUM_PERSONS);
+
+        // 2. Setup Store & Benchmark Write (Load)
+        console.log("Setting up store and loading data...");
+        const { store, loadTimeMs } = await setupAndLoadStore(persons);
+        if (loadTimeMs >= 0) {
+            results.loadTimes.push(loadTimeMs);
+            console.log(`Load Time: ${loadTimeMs.toFixed(2)} ms`);
+        } else {
+            console.error("Failed to load data, skipping run.");
+            continue; // Skip read benchmarks if load failed
+        }
+
+        // 3. Benchmark Chained Select Read
+        console.log("Benchmarking Chained Select Read...");
+        const chainedTimeMs = await benchmarkChainedSelect(store);
+        if (chainedTimeMs >= 0) {
+            results.chainedReadTimes.push(chainedTimeMs);
+            console.log(`Chained Read Time: ${chainedTimeMs.toFixed(2)} ms`);
+        }
+
+        // 4. Benchmark Fetch/Reconstruct Read
+        console.log("Benchmarking Fetch/Reconstruct Read...");
+        const reconstructTimeMs = await benchmarkFetchReconstruct(store, personUris);
+         if (reconstructTimeMs >= 0) {
+            results.reconstructReadTimes.push(reconstructTimeMs);
+            console.log(`Fetch/Reconstruct Read Time: ${reconstructTimeMs.toFixed(2)} ms`);
+        }
+
+        // Optional: Clear store or create a new one for each run if memory is a concern
+        // However, keeping the store allows JIT optimizations to potentially stabilize results
+    }
+
+    // --- Calculate Averages ---
+    const avgLoadTime = results.loadTimes.reduce((a, b) => a + b, 0) / results.loadTimes.length;
+    const avgChainedReadTime = results.chainedReadTimes.reduce((a, b) => a + b, 0) / results.chainedReadTimes.length;
+    const avgReconstructReadTime = results.reconstructReadTimes.reduce((a, b) => a + b, 0) / results.reconstructReadTimes.length;
+
+    console.log("\n--- Benchmark Summary ---");
+    console.log(`Average Load Time (${results.loadTimes.length} runs): ${avgLoadTime.toFixed(2)} ms`);
+    console.log(`Average Chained Read Time (${results.chainedReadTimes.length} runs): ${avgChainedReadTime.toFixed(2)} ms`);
+    console.log(`Average Fetch/Reconstruct Read Time (${results.reconstructReadTimes.length} runs): ${avgReconstructReadTime.toFixed(2)} ms`);
+    console.log("------------------------");
+}
+
+// Run the main benchmark function
+runBenchmarks().catch(error => {
+    console.error("\n--- Benchmark Failed ---");
+    console.error(error);
+});

@@ -1,0 +1,48 @@
+import type { MappingConfiguration } from '../rdf-mapper/types'; // Import the generic type
+
+const xsd = 'http://www.w3.org/2001/XMLSchema#'; // Define xsd namespace
+
+// Example mapping configuration using the generic types
+const mapping: MappingConfiguration = {
+  Person: {
+    classUri: 'http://example.org/ontology#Person',
+    properties: {
+      uri: { uri: '@id' }, // Special case for the resource identifier itself
+      id: { uri: 'http://example.org/ontology#personId' }, // Assuming a separate ID property if needed
+      firstName: { uri: 'http://xmlns.com/foaf/0.1/firstName' }, // Using FOAF vocabulary
+      lastName: { uri: 'http://xmlns.com/foaf/0.1/lastName' },
+      age: { uri: 'http://xmlns.com/foaf/0.1/age', datatype: `${xsd}integer` }, // Added datatype
+      currentAddress: {
+        uri: 'http://example.org/ontology#hasAddress',
+        isObjectProperty: true,
+        objectType: 'Address', // Added objectType
+      },
+      hobbies: {
+        uri: 'http://example.org/ontology#hasHobby',
+        isObjectProperty: true,
+        isArray: true,
+        objectType: 'Hobby', // Added objectType
+      },
+    },
+  }, // Removed ClassMapping assertion
+  Address: {
+    classUri: 'http://example.org/ontology#Address',
+    properties: {
+      uri: { uri: '@id' },
+      street: { uri: 'http://example.org/ontology#street' },
+      city: { uri: 'http://example.org/ontology#city' },
+      postalCode: { uri: 'http://example.org/ontology#postalCode' },
+      country: { uri: 'http://example.org/ontology#country' },
+    },
+  }, // Removed ClassMapping assertion
+  Hobby: {
+    classUri: 'http://example.org/ontology#Hobby',
+    properties: {
+      uri: { uri: '@id' },
+      name: { uri: 'http://example.org/ontology#hobbyName' },
+      yearsPracticed: { uri: 'http://example.org/ontology#yearsPracticed', datatype: `${xsd}integer` }, // Added datatype
+    },
+  }, // Removed ClassMapping assertion
+};
+
+export default mapping;

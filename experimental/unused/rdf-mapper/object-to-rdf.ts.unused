@@ -1,0 +1,266 @@
+import crypto from 'crypto';
+import DataFactory from '@rdfjs/data-model';
+import type { Quad, NamedNode, Literal } from '@rdfjs/types';
+import type { MappingConfiguration, PropertyMapping } from './types';
+import { quadToSparqlTriple } from './sparqlUtils'; // Import the helper
+
+const DF = DataFactory;
+const xsd = 'http://www.w3.org/2001/XMLSchema#';
+
+/**
+ * Converts a TypeScript object into an array of RDF/JS Quads based on a provided mapping configuration.
+ * Assumes quads belong to the default graph.
+ *
+ * @param obj The TypeScript object to convert. Should have a structure matching the mapping.
+ * @param typeName The key in the mapping configuration corresponding to the object's type (e.g., 'Person').
+ * @param mappingConfig The mapping configuration object defining RDF classes and properties.
+ * @param baseUri A base URI used for generating new resource URIs if obj.uri is not present.
+ * @returns An array of RDF/JS Quads representing the object.
+ */
+function objectToQuads(
+  obj: any, // The object to convert (can be of any type defined in mappingConfig)
+  typeName: string, // The name of the type in the mappingConfig
+  mappingConfig: MappingConfiguration, // The mapping configuration passed as an argument
+  baseUri: string = 'http://example.org/data/' // Base URI for generating new resource URIs
+): Quad[] {
+  const classMapping = mappingConfig[typeName];
+  if (!classMapping) {
+    throw new Error(`No mapping found for type: ${typeName}`);
+  }
+
+  // Determine subject URI - use existing obj.uri or generate one
+  let subjectUriString = obj.uri;
+  if (!subjectUriString) {
+    // Generate a UUID-based URN if no URI is present
+    const uuid = crypto.randomUUID();
+    subjectUriString = `urn:uuid:${uuid}`;
+    obj.uri = subjectUriString; // Assign back to object for potential use in nested calls
+  }
+  const subjectNode = DF.namedNode(subjectUriString);
+
+  let quads: Quad[] = [];
+
+  // Add rdf:type quad
+  quads.push(DF.quad(
+    subjectNode,
+    DF.namedNode('http://www.w3.org/1999/02/22-rdf-syntax-ns#type'),
+    DF.namedNode(classMapping.classUri)
+  ));
+
+  // Iterate over properties defined in the mapping for this type
+  for (const tsPropertyName in classMapping.properties) {
+    const propMapping = classMapping.properties[tsPropertyName];
+    const value = obj[tsPropertyName];
+
+    // Skip if value is undefined or null, or if it's the special '@id' mapping
+    if (value === undefined || value === null || propMapping.uri === '@id') {
+      continue;
+    }
+
+    const predicateNode = DF.namedNode(propMapping.uri);
+
+    if (propMapping.isObjectProperty) {
+      if (!propMapping.objectType) {
+        console.warn(`Mapping for property '${tsPropertyName}' of type '${typeName}' is 'isObjectProperty' but missing 'objectType'. Skipping.`);
+        continue;
+      }
+      const nestedTypeName = propMapping.objectType; // Use objectType from mapping
+
+      const items = propMapping.isArray ? (value as any[]) : [value];
+      for (const item of items) {
+        if (typeof item !== 'object' || item === null) continue; // Skip invalid items
+
+        // Recursively convert nested object and get its Quads
+        // Pass the mappingConfig down
+        const nestedQuads = objectToQuads(item, nestedTypeName, mappingConfig, baseUri);
+        const nestedObjectUri = item.uri; // Get URI assigned/generated in recursive call
+
+        if (nestedObjectUri) {
+          // Add quad linking parent to nested object
+          quads.push(DF.quad(
+            subjectNode,
+            predicateNode,
+            DF.namedNode(nestedObjectUri)
+          ));
+          // Add quads from the nested object conversion
+          quads = quads.concat(nestedQuads);
+        } else {
+            // This case might occur if URI generation failed in the recursive call
+             console.warn(`Could not obtain URI for nested object of type '${nestedTypeName}' for property '${tsPropertyName}'. Linking quad not created.`);
+        }
+      }
+    } else {
+      // Handle literal properties
+      const items = propMapping.isArray ? (value as any[]) : [value];
+      for (const item of items) {
+        let literal: Literal;
+        const literalValue = String(item); // Convert value to string for literal creation
+
+        // Determine datatype: Use mapping, then infer, then default to string
+        let datatypeUri: string | undefined = propMapping.datatype;
+        if (!datatypeUri) {
+            if (typeof item === 'number') {
+                datatypeUri = Number.isInteger(item) ? `${xsd}integer` : `${xsd}decimal`;
+            } else if (typeof item === 'boolean') {
+                datatypeUri = `${xsd}boolean`;
+            }
+            // Default to xsd:string (implicitly handled by RDF.js if no datatype)
+        }
+
+        if (datatypeUri) {
+            literal = DF.literal(literalValue, DF.namedNode(datatypeUri));
+        } else {
+            literal = DF.literal(literalValue); // Default xsd:string
+        }
+
+        quads.push(DF.quad(
+          subjectNode,
+          predicateNode,
+          literal
+        ));
+      }
+    }
+  }
+
+  // Simple deduplication based on quad equality
+  const uniqueQuads: Quad[] = [];
+  const quadSet = new Set<string>(); // Use string representation for uniqueness check
+
+  for (const quad of quads) {
+      const quadString = `${quad.subject.value} ${quad.predicate.value} ${quad.object.value} ${quad.graph.value}`;
+      if (!quadSet.has(quadString)) {
+          quadSet.add(quadString);
+          uniqueQuads.push(quad);
+      }
+  }
+
+  return uniqueQuads;
+}
+
+/**
+ * Generates a SPARQL UPDATE query (DELETE/INSERT) to reflect changes between an old and new object state.
+ * Assumes changes occur in the default graph.
+ *
+ * @param oldObj The original TypeScript object state (or null/undefined if it's a new object).
+ * @param newObj The updated TypeScript object state.
+ * @param typeName The key in the mapping configuration corresponding to the object's type.
+ * @param mappingConfig The mapping configuration object.
+ * @param baseUri A base URI used for generating new resource URIs if needed.
+ * @returns A SPARQL UPDATE query string, or an empty string if no changes detected.
+ */
+function generateUpdateSparql(
+  oldObj: any | null | undefined,
+  newObj: any,
+  typeName: string,
+  mappingConfig: MappingConfiguration,
+  baseUri: string = 'http://example.org/data/'
+): string {
+  if (!newObj || typeof newObj !== 'object') {
+    throw new Error('New object state is required for update.');
+  }
+  if (!newObj.uri && oldObj?.uri) {
+      // If the new object doesn't have a URI but the old one did, use the old URI.
+      // This handles cases where the URI might be stripped before passing to the update function.
+      newObj.uri = oldObj.uri;
+  } else if (!newObj.uri && !oldObj?.uri) {
+      // If neither has a URI, we treat it like a new insert, objectToQuads will generate one.
+      // However, this scenario might indicate an issue if an update was expected.
+      console.warn(`Generating update SPARQL for object type '${typeName}' without a URI. Treating as insert.`);
+  } else if (oldObj && newObj.uri !== oldObj.uri) {
+      // If URIs differ, this isn't a simple update of the same resource.
+      // This function assumes oldObj and newObj represent the same logical entity.
+      throw new Error(`Cannot generate update SPARQL: URI mismatch between old ('${oldObj.uri}') and new ('${newObj.uri}') objects.`);
+  }
+
+  // Generate quads for both states
+  // Note: objectToQuads might modify the object by adding a URI if it's missing.
+  // We ensure the same URI is used by potentially setting newObj.uri above.
+  const oldQuads = oldObj ? objectToQuads(oldObj, typeName, mappingConfig, baseUri) : [];
+  const newQuads = objectToQuads(newObj, typeName, mappingConfig, baseUri); // newObj might get URI assigned here if missing
+
+  // Convert quads to string representations for easy comparison
+  const oldQuadStrings = new Set(oldQuads.map(quadToSparqlTriple));
+  const newQuadStrings = new Set(newQuads.map(quadToSparqlTriple));
+
+  const quadsToDelete: string[] = [];
+  const quadsToInsert: string[] = [];
+
+  // Find quads in old state but not in new state (to delete)
+  oldQuadStrings.forEach(quadStr => {
+    if (!newQuadStrings.has(quadStr)) {
+      quadsToDelete.push(quadStr);
+    }
+  });
+
+  // Find quads in new state but not in old state (to insert)
+  newQuadStrings.forEach(quadStr => {
+    if (!oldQuadStrings.has(quadStr)) {
+      quadsToInsert.push(quadStr);
+    }
+  });
+
+  // Construct the transactional SPARQL query using DELETE/INSERT/WHERE
+  if (quadsToDelete.length === 0 && quadsToInsert.length === 0) {
+    return ''; // No changes detected
+  }
+
+  let sparqlQuery = '';
+
+  // Construct DELETE clause (optional)
+  if (quadsToDelete.length > 0) {
+    sparqlQuery += `DELETE {\n  ${quadsToDelete.join('\n  ')}\n}\n`;
+  } else {
+    // Need an empty DELETE clause if only inserting but using WHERE
+    sparqlQuery += `DELETE {}\n`;
+  }
+
+  // Construct INSERT clause (optional)
+  if (quadsToInsert.length > 0) {
+    sparqlQuery += `INSERT {\n  ${quadsToInsert.join('\n  ')}\n}\n`;
+  } else {
+     // Need an empty INSERT clause if only deleting but using WHERE
+     sparqlQuery += `INSERT {}\n`;
+  }
+
+  // Construct WHERE clause - this makes it transactional
+  // The WHERE clause includes all triples that are expected to exist (those being deleted)
+  // If any of these triples are missing, the entire operation fails.
+  // If only inserting, the WHERE clause might be minimal or based on the subject's existence.
+  // For simplicity and strong transactionality, we'll require the deleted triples to exist.
+  // If only inserting (oldObj is null), the WHERE clause should ensure the subject doesn't unexpectedly exist with conflicting data,
+  // but a simple WHERE { } might suffice if we assume the insert is valid.
+  // Let's use the quadsToDelete for the WHERE condition to ensure atomicity for updates.
+  // For pure inserts (oldObj is null), a WHERE clause isn't strictly necessary for DELETE/INSERT,
+  // but SPARQL requires a WHERE clause for this pattern. We can use a minimal condition.
+
+  if (oldObj && quadsToDelete.length > 0) {
+      // For updates with deletions, the WHERE ensures the old state exists
+      sparqlQuery += `WHERE {\n  ${quadsToDelete.join('\n  ')}\n}`;
+  } else if (quadsToInsert.length > 0) {
+      // For pure inserts or updates without deletions, provide a minimal WHERE.
+      // Using a non-existent triple pattern or simply {} might depend on SPARQL engine specifics.
+      // A common pattern is to check for the subject's type, assuming it should exist if we are updating.
+      // If it's a pure insert, this WHERE might be empty or check non-existence if needed,
+      // but the DELETE/INSERT pattern requires *some* WHERE clause.
+      // Let's use the subject's type assertion from the *new* quads if available.
+      const typeTriple = newQuads.find(q => q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type');
+      if (typeTriple) {
+          sparqlQuery += `WHERE {\n  ${quadToSparqlTriple(typeTriple)}\n}`; // Check type exists if inserting/updating without delete
+      } else if (newObj.uri) {
+          // Fallback: Check if the subject exists at all (less specific)
+          sparqlQuery += `WHERE { <${newObj.uri}> ?p ?o }`; // Requires *some* triple for the subject
+      } else {
+          // Should not happen if URI is generated, but as a last resort:
+          sparqlQuery += `WHERE {}`; // Minimal WHERE clause
+      }
+  } else {
+       // Only deletions, WHERE clause already constructed using quadsToDelete
+       sparqlQuery += `WHERE {\n  ${quadsToDelete.join('\n  ')}\n}`;
+  }
+
+
+  return sparqlQuery.trim();
+}
+
+
+export { objectToQuads, generateUpdateSparql };

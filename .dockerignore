@@ -1,0 +1,43 @@
+# Git files
+.git
+.gitignore
+
+# Node modules (we install them inside the container)
+node_modules
+
+# Build output (created inside the container)
+dist
+
+# Test files and configuration
+test
+jest.config.js
+
+# Coverage reports
+coverage
+
+# Local environment files (should be passed as env vars to the container)
+.env*
+*.env
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+
+# Editor/OS specific files
+.vscode/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.DS_Store
+
+# Development/Documentation/Temporary files
+experimental/
+docs/
+memory-bank/
+__blobstorage__/
+__queuestorage__/
+__azurite_*
+*.ts.unused
+*.json.copy
+tsconfig.json # Not needed at runtime

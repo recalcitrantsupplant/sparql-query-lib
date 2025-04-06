@@ -1,0 +1,157 @@
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'; // Import Request/Reply
+import { LibraryManager } from './libraryManager';
+// Removed FileSystemQueryStorage import
+import type { Library } from '../types/schema-dts'; // Import Library type from generated types
+
+// Extend FastifyInstance types if not already done globally
+// (Should match declarations in other route files)
+declare module 'fastify' {
+  interface FastifyInstance {
+    libraryManager: LibraryManager;
+    // backendStorage might also be here
+  }
+}
+
+
+export const registerLibraryRoutes = async (app: FastifyInstance) => {
+
+  // TODO: Refactor library routes after LibraryManager/Storage changes
+
+  /* // Commenting out routes dependent on removed LibraryManager methods
+  // Get all libraries
+  app.get('/libraries', {
+    schema: {
+      tags: ['Library'],
+      operationId: 'listLibraries',
+      response: {
+        200: {
+          type: 'array',
+          items: {
+            // Assuming Library type has id and name. Adjust if needed based on types.ts
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              name: { type: 'string' },
+              description: { type: 'string' } // Added optional description to schema
+              // queries property might be too large for a list view, omitting for now
+            }
+          }
+        }
+      }
+    }
+  }, async (request: FastifyRequest, reply: FastifyReply) => { // Add types
+    try {
+      // Use await as getLibraries is now async
+      const allLibraries = await app.libraryManager.getLibraries();
+      // Map to summary objects, including description if available
+      const librariesSummary = allLibraries.map(lib => ({
+          '@id': lib['@id'], // Use @id
+          name: lib.name,
+          description: lib.description // Include description
+      }));
+      reply.send(librariesSummary);
+    } catch (error: any) {
+       console.error('Failed to get libraries:', error);
+      reply.status(500).send({ error: error.message });
+    }
+  });
+  */
+
+  /*
+  // Create a new library (allow description)
+  app.post<{ Body: { name: string; description?: string } }>('/libraries', { // Update Body type
+    schema: {
+      tags: ['Library'],
+      operationId: 'createLibrary',
+      body: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', description: 'Name for the new library' },
+          description: { type: 'string', description: 'Optional description for the library' } // Add description
+        }
+      },
+      response: {
+        201: {
+          // Response should include description if provided
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            description: { type: 'string' } // Add description
+          }
+        }
+      }
+    }
+  }, async (request: FastifyRequest<{ Body: { name: string; description?: string } }>, reply: FastifyReply) => { // Add types
+    try {
+      const { name, description } = request.body; // Destructure name and description
+      // Pass both name and description to the manager method
+      const newLibrary = await app.libraryManager.createLibrary(name, description);
+      // Return the full library object (which now includes description)
+      reply.status(201).send(newLibrary);
+    } catch (error: any) {
+      console.error('Failed to create library:', error);
+       // Handle specific errors like duplicate name
+       if (error.message?.includes('already exists')) {
+           reply.status(409).send({ error: error.message }); // 409 Conflict
+       } else {
+           reply.status(500).send({ error: error.message });
+       }
+    }
+  });
+  */
+
+  // REMOVED: GET /libraries/current
+  // REMOVED: PUT /libraries/current
+
+   // TODO: Add PUT /libraries/:libraryId route for updating name/description
+
+  /*
+  // Delete a library
+  app.delete<{ Params: { libraryId: string } }>('/libraries/:libraryId', {
+    schema: {
+      tags: ['Library'],
+      operationId: 'deleteLibrary',
+      params: {
+        type: 'object',
+        required: ['libraryId'],
+        properties: {
+          libraryId: { type: 'string', description: 'ID of the library to delete' }
+        }
+      },
+      response: {
+        204: { // No content on success
+          type: 'null',
+          description: 'Library deleted successfully'
+        },
+        404: { // Not Found error response schema
+           type: 'object',
+           properties: {
+             error: { type: 'string' }
+           }
+        },
+        500: { // Internal Server Error response schema
+           type: 'object',
+           properties: {
+             error: { type: 'string' }
+           }
+        }
+      }
+    }
+  }, async (request: FastifyRequest<{ Params: { libraryId: string } }>, reply: FastifyReply) => { // Add types
+    try {
+      const { libraryId } = request.params;
+      const deleted = await app.libraryManager.deleteLibrary(libraryId);
+      if (deleted) {
+        reply.status(204).send();
+      } else {
+        reply.status(404).send({ error: 'Library not found' });
+      }
+    } catch (error: any) {
+      console.error('Failed to delete library:', error);
+      reply.status(500).send({ error: error.message });
+    }
+  });
+  */
+};
